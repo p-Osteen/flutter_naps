@@ -8,6 +8,10 @@ const int kDpSeparator = 0x2A;
 const int kDpTerminator = 0x3F;
 
 /// Tag carrying printable receipt data (DP).
+/// Message type. Occurs exactly once per frame, which makes it the only
+/// reliable "a new frame starts here" marker in a format with no delimiter.
+const String kTagMessageType = '001';
+
 const String kTagDp = '010';
 
 /// Sub-tags that make up one printable receipt line: DP1..DP4.
@@ -61,12 +65,24 @@ class NapsFrameScan {
   /// delimiter, so for every other message the end has to be inferred.
   final bool dpTerminated;
 
+  /// True when scanning stopped because the NEXT frame's tag 001 was already
+  /// in the buffer.
+  ///
+  /// This is the only way to know a frame is definitively closed rather than
+  /// merely paused: tag 001 occurs exactly once per frame, so seeing another
+  /// one proves the previous frame ended. `end < buffer.length` does not prove
+  /// it - a single byte of this frame's own trailing field satisfies that too,
+  /// which is what made an earlier version of this call it "delimited" while
+  /// the frame was still growing.
+  final bool nextFrameStarts;
+
   const NapsFrameScan(
     this.status,
     this.elements,
     this.end, {
     this.dpTruncated = false,
     this.dpTerminated = false,
+    this.nextFrameStarts = false,
   });
 }
 
@@ -161,6 +177,17 @@ class NapsTlv {
 
     while (i < bytes.length) {
       if (i + 6 > bytes.length) {
+        // Past a DP terminator the frame is already whole, so a few trailing
+        // bytes that are not yet a header end it rather than stall it.
+        if (terminated) {
+          return NapsFrameScan(
+            NapsScanStatus.complete,
+            elements,
+            i,
+            dpTruncated: truncated,
+            dpTerminated: true,
+          );
+        }
         // A header has begun but not fully arrived. Never treat this as the
         // end of a frame: doing so delivers a message with fields missing.
         return NapsFrameScan(NapsScanStatus.needMoreData, elements, -1);
@@ -168,6 +195,23 @@ class NapsTlv {
 
       final tag = _tagAt(bytes, i);
       final declared = _int3(bytes, i + 3);
+
+      // Fields can follow the receipt. Tag 013 (CR) in particular is not
+      // always ahead of DP, and dropping it leaves an empty response code -
+      // which reads as a decline for a payment the terminal approved. So keep
+      // consuming after the terminator, and stop at tag 001 instead: the
+      // message type occurs exactly once per frame, which makes it the one
+      // unambiguous marker for "the next response starts here".
+      if (terminated && tag == kTagMessageType) {
+        return NapsFrameScan(
+          NapsScanStatus.complete,
+          elements,
+          i,
+          dpTruncated: truncated,
+          dpTerminated: true,
+          nextFrameStarts: true,
+        );
+      }
 
       if (!_isNumeric(tag) || declared == null) {
         if (elements.isEmpty) {
@@ -226,20 +270,9 @@ class NapsTlv {
       );
       i = valueEnd;
 
-      if (terminated) {
-        // DP is the last field of a frame and its '?' is the only explicit
-        // end-of-message marker the protocol has. Stop here rather than
-        // running on into whatever arrived next, which would merge two
-        // responses into one message and silently drop the first one's
-        // duplicate tags.
-        return NapsFrameScan(
-          NapsScanStatus.complete,
-          elements,
-          i,
-          dpTruncated: truncated,
-          dpTerminated: true,
-        );
-      }
+      // No hard stop here any more: the loop continues so trailing fields are
+      // captured, and returns above as soon as the next frame's tag 001
+      // appears or the bytes run out.
     }
 
     if (elements.isEmpty) {

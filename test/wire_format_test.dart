@@ -216,7 +216,11 @@ void main() {
             'the complete frame was not recognised at chunk size $chunkSize',
       );
       expect(finished!.end, frame101.length);
-      expect(finished.delimited, isTrue);
+      // Not "delimited": the '?' ends the receipt, but tags can follow it, and
+      // here the frame ends exactly at the end of the buffer - so the caller
+      // must let the stream settle rather than act immediately. A terminator
+      // only settles the boundary when more bytes are already behind it.
+      expect(finished.delimited, isFalse);
     }
 
     for (final size in [1, 2, 7, 64, 137, 512, 1024, 4096]) {
@@ -433,6 +437,111 @@ void main() {
       expect(NapsSdk.posIdIssue(''), contains('required'));
       // Length is deliberately not validated - any numeric value is accepted.
       expect(NapsSdk.posIdIssue('12345678'), isNull);
+    });
+  });
+
+  group('Fields after the receipt', () {
+    // The terminal is not required to put every scalar ahead of DP. Tag 013
+    // (CR) after the receipt used to be dropped, because scanning stopped at
+    // the '?' - leaving an empty response code, which reads as a decline for
+    // a payment that was approved.
+    Uint8List frameWithTrailingTags() => _concat([
+      _tlv('001', '101'),
+      _tlv('003', '0100001'),
+      _tlv('004', '000108'),
+      _tlv('002', '000000000022'),
+      _dpField(_dpPayload(const ['Naps', 'MERCHANT COPY'])),
+      _tlv('013', '000'),
+      _tlv('014', '23032026'),
+      _tlv('015', '141456'),
+    ]);
+
+    test('a tag after the DP terminator is captured, not dropped', () {
+      final scan = NapsTlv.scanFrame(frameWithTrailingTags());
+      expect(scan.status, NapsScanStatus.complete);
+      final msg = NapsMessage.fromScan(scan, frameWithTrailingTags());
+      expect(msg.responseCode, '000', reason: 'CR followed the receipt');
+      expect(msg.elements.containsKey('014'), isTrue);
+      expect(msg.elements.containsKey('015'), isTrue);
+    });
+
+    test('the whole frame is consumed', () {
+      final f = frameWithTrailingTags();
+      expect(NapsTlv.scanFrame(f).end, f.length);
+    });
+
+    test('a following frame is still not merged in', () {
+      final first = frameWithTrailingTags();
+      final second = _concat([
+        _tlv('001', '102'),
+        _tlv('003', '0100001'),
+        _tlv('004', '000109'),
+      ]);
+      final scan = NapsTlv.scanFrame(_concat([first, second]));
+      expect(scan.status, NapsScanStatus.complete);
+      expect(scan.end, first.length, reason: 'stops where tag 001 restarts');
+      expect(scan.nextFrameStarts, isTrue);
+      final msg = NapsMessage.fromScan(scan, first);
+      expect(msg.messageType, '101');
+      expect(msg.responseCode, '000');
+    });
+
+    test('a frame is delimited only once the next one has begun', () {
+      final first = frameWithTrailingTags();
+      final buffer = NapsFrameBuffer()..add(first);
+      // Whole frame present, nothing after it: the boundary is not yet proven,
+      // so the caller must let the stream settle.
+      expect(buffer.peekFrame()!.delimited, isFalse);
+
+      // Tag 001 of the next response proves the first one ended.
+      buffer.add(_tlv('001', '102'));
+      final peek = buffer.peekFrame()!;
+      expect(peek.delimited, isTrue);
+      expect(peek.end, first.length);
+      expect(peek.message.responseCode, '000');
+    });
+
+    test('a receipt-bearing frame with no trailing tags still completes', () {
+      final f = _concat([
+        _tlv('001', '101'),
+        _tlv('003', '0100001'),
+        _tlv('004', '000108'),
+        _dpField(_dpPayload(const ['Naps'])),
+      ]);
+      final scan = NapsTlv.scanFrame(f);
+      expect(scan.status, NapsScanStatus.complete);
+      expect(scan.dpTerminated, isTrue);
+      expect(scan.end, f.length);
+    });
+
+    test('trailing tags arriving late are not lost', () {
+      // Byte-at-a-time delivery. Once the '?' lands the buffer does report a
+      // frame - it cannot know whether anything follows - but it must mark it
+      // undelimited so the connection's settle window runs. By the time all
+      // the bytes are in, the CR that followed the receipt must be present.
+      final f = frameWithTrailingTags();
+      final buf = NapsFrameBuffer();
+      var earlyDelimited = 0;
+      NapsFramePeek? done;
+      for (var i = 0; i < f.length; i++) {
+        buf.add([f[i]]);
+        final peek = buf.peekFrame();
+        if (peek == null) continue;
+        if (buf.length < f.length) {
+          if (peek.delimited) earlyDelimited++;
+        } else {
+          done = peek;
+        }
+      }
+      expect(
+        earlyDelimited,
+        0,
+        reason: 'a frame that might still be growing was called delimited',
+      );
+      expect(done, isNotNull);
+      expect(done!.end, f.length);
+      expect(done.message.responseCode, '000');
+      expect(done.message.elements.containsKey('015'), isTrue);
     });
   });
 }

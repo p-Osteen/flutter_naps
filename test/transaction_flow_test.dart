@@ -537,6 +537,73 @@ void main() {
     );
   });
 
+  group('NS echo Tests', () {
+    late MockNapsConnection connection;
+    late NapsSdk sdk;
+    const posId = '1234567';
+
+    setUp(() {
+      connection = MockNapsConnection();
+      sdk = NapsSdk(
+        connection: connection,
+        posId: posId,
+        initialSequenceNumber: 100,
+      );
+      connection.connect();
+    });
+
+    // Four days of production traffic carried NS 000002 in both directions,
+    // which agreed only because the old kiosk never advanced its counter.
+    // Requiring an echo rejected every real response - the Bournazel ping
+    // failed with protocolMismatch against a terminal that was answering.
+    NapsMessage tm109({required String ns}) => NapsMessage.fromElements([
+      TlvElement('001', '109'),
+      TlvElement('003', posId),
+      TlvElement('004', ns),
+      TlvElement('013', '000'),
+      TlvElement('014', '14072026'),
+      TlvElement('015', '120000'),
+    ]);
+
+    test('a response whose NS differs from the request is accepted', () async {
+      // Sent NS is 101; the terminal answers with its own 000002.
+      connection.queueResponse(tm109(ns: '000002'));
+      final result = await sdk.networkTest();
+      expect(result.isSuccess, isTrue, reason: result.description);
+      expect(result.responseCode, '000');
+    });
+
+    test('the NS difference is reported, not swallowed', () async {
+      connection.queueResponse(tm109(ns: '000002'));
+      final result = await sdk.networkTest();
+      expect(result.description, contains('NS not echoed'));
+    });
+
+    test('an echoed NS produces no note', () async {
+      connection.queueResponse(tm109(ns: '000101'));
+      final result = await sdk.networkTest();
+      expect(result.isSuccess, isTrue);
+      expect(result.description, isNot(contains('NS not echoed')));
+    });
+
+    test('a wrong message type is still rejected', () async {
+      // TM 102 in answer to TM 009: the message type is what correlates.
+      connection.queueResponse(
+        NapsMessage.fromElements([
+          TlvElement('001', '102'),
+          TlvElement('003', posId),
+          TlvElement('004', '000101'),
+          TlvElement('013', '000'),
+          TlvElement('014', '14072026'),
+          TlvElement('015', '120000'),
+        ]),
+      );
+      final result = await sdk.networkTest();
+      expect(result.isSuccess, isFalse);
+      expect(result.failureReason, NapsFailureReason.protocolMismatch);
+    });
+  });
+
   group('Cancel Token Tests', () {
     late MockNapsConnection connection;
     late NapsSdk sdk;

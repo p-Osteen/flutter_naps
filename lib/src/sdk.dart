@@ -428,13 +428,34 @@ class NapsSdk {
   Future<int> _nextSequence() => sequenceStore.next();
 
   /// Validates that a response is the answer to the request just sent.
+  /// Whether [response] answers the request we sent.
+  ///
+  /// Only the message type is decisive. NS (tag 004) is deliberately NOT
+  /// required to match, because there is no evidence this terminal echoes it:
+  /// across four days of production traffic every frame in both directions
+  /// carried NS `000002`, which happened to agree only because the old kiosk
+  /// never advanced its counter. Now that a durable sequence store issues real
+  /// numbers, requiring an echo would reject every response the terminal
+  /// sends - which is exactly what the TM 009 ping showed at Bournazel
+  /// (`protocolMismatch` on a terminal that was reachable and answering).
+  ///
+  /// Nothing safety-critical rests on NS: an approval is correlated to an
+  /// order by STAN, amount and receipt timestamp, not by NS. NS remains in
+  /// the request, is logged on both sides, and stays available on
+  /// [NapsTransactionResult.sequenceNumber] for reconciliation - it just no
+  /// longer decides whether a response is accepted.
   bool _validateResponse(
     NapsMessage response,
     String expectedTm,
     int expectedNs,
-  ) =>
-      response.messageType == expectedTm &&
-      response.sequenceNumber == expectedNs;
+  ) => response.messageType == expectedTm;
+
+  /// Describes an NS that came back different from the one sent, for logs.
+  static String? _nsNote(NapsMessage response, int expectedNs) =>
+      response.sequenceNumber == expectedNs
+      ? null
+      : 'NS not echoed: sent $expectedNs, received '
+            '${response.sequenceNumber} (informational)';
 
   NapsFailureReason _reasonFor(Object error) {
     if (error is TimeoutException) return NapsFailureReason.timeout;
@@ -470,11 +491,14 @@ class NapsSdk {
       }
 
       final metadata = NapsResponseCodes.lookup(response.responseCode);
+      final nsNote = _nsNote(response, seqNum);
       return NapsOperationResult(
         isSuccess: metadata.isSuccess,
         source: NapsResultSource.terminal,
         responseCode: response.responseCode,
-        description: metadata.description,
+        description: nsNote == null
+            ? metadata.description
+            : '${metadata.description} ($nsNote)',
         userMessage: metadata.userMessage,
         failureReason: metadata.isSuccess
             ? NapsFailureReason.none

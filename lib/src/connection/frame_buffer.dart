@@ -105,7 +105,13 @@ class NapsFrameBuffer {
 
     if (!allowUnterminatedDp && !_envelopeSatisfied(message, scan)) return null;
 
-    return NapsFramePeek(message, scan.end, scan.dpTerminated);
+    // "Delimited" means the boundary is certain, and the caller may act at
+    // once. That is only true when the next frame's tag 001 has arrived: a DP
+    // terminator ends the receipt, but fields can follow it, so a frame that
+    // merely reaches the end of the buffer may still be growing. Anything
+    // else goes through the caller's settle window.
+    final delimited = scan.dpTerminated && scan.nextFrameStarts;
+    return NapsFramePeek(message, scan.end, delimited);
   }
 
   /// Drops [end] bytes from the front of the buffer, after a peeked frame has
@@ -119,6 +125,14 @@ class NapsFrameBuffer {
   /// True when the parsed fields amount to a message the terminal could
   /// actually have finished sending.
   bool _envelopeSatisfied(NapsMessage message, NapsFrameScan scan) {
+    // A `?` terminator is the wire format's own end-of-message marker. Once
+    // it has been seen the frame is whole by definition, so requiring DA/HE
+    // or CR on top of it can only reject a message the terminal considers
+    // finished - and the four days of logs cannot say whether this terminal
+    // sends those tags on a receipt-bearing response, because the old logger
+    // truncated every such frame before its tail.
+    if (scan.dpTerminated) return true;
+
     for (final tag in _envelope) {
       if (!message.elements.containsKey(tag)) return false;
     }
