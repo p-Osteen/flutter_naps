@@ -27,13 +27,41 @@ void main() {
       expect(msg.timeStr, '123456');
 
       // Stricter MD compliance checks for padding and lengths
-      expect(msg.elements['001']?.value.length, 3, reason: 'TM must be 3 chars');
-      expect(msg.elements['002']?.value.length, 12, reason: 'MT (Amount) must be 12 chars');
-      expect(msg.elements['003']?.value.length, 7, reason: 'NCAI (POS ID) must be 7 chars');
-      expect(msg.elements['004']?.value.length, 6, reason: 'NS (Sequence) must be 6 chars');
-      expect(msg.elements['012']?.value.length, 3, reason: 'DE (Currency) must be 3 chars');
-      expect(msg.elements['014']?.value.length, 8, reason: 'DA (Date) must be 8 chars');
-      expect(msg.elements['015']?.value.length, 6, reason: 'HE (Time) must be 6 chars');
+      expect(
+        msg.elements['001']?.value.length,
+        3,
+        reason: 'TM must be 3 chars',
+      );
+      expect(
+        msg.elements['002']?.value.length,
+        12,
+        reason: 'MT (Amount) must be 12 chars',
+      );
+      expect(
+        msg.elements['003']?.value.length,
+        7,
+        reason: 'NCAI (POS ID) must be 7 chars',
+      );
+      expect(
+        msg.elements['004']?.value.length,
+        6,
+        reason: 'NS (Sequence) must be 6 chars',
+      );
+      expect(
+        msg.elements['012']?.value.length,
+        3,
+        reason: 'DE (Currency) must be 3 chars',
+      );
+      expect(
+        msg.elements['014']?.value.length,
+        8,
+        reason: 'DA (Date) must be 8 chars',
+      );
+      expect(
+        msg.elements['015']?.value.length,
+        6,
+        reason: 'HE (Time) must be 6 chars',
+      );
 
       final frame = msg.toFrame();
       final decoded = NapsMessage.fromFrame(frame);
@@ -68,15 +96,43 @@ void main() {
       expect(msg.cardNumber, '533576******8237');
       expect(msg.cardNumber, '533576******8237');
       expect(msg.cardExpirationDate, '2409');
-      
+
       // Stricter MD compliance checks for padding and lengths
-      expect(msg.elements['001']?.value.length, 3, reason: 'TM must be 3 chars');
-      expect(msg.elements['002']?.value.length, 12, reason: 'MT (Amount) must be 12 chars');
-      expect(msg.elements['003']?.value.length, 7, reason: 'NCAI (POS ID) must be 7 chars');
-      expect(msg.elements['004']?.value.length, 6, reason: 'NS (Sequence) must be 6 chars');
-      expect(msg.elements['008']?.value.length, 6, reason: 'STAN must be 6 chars');
-      expect(msg.elements['012']?.value.length, 3, reason: 'DE (Currency) must be 3 chars');
-      expect(msg.elements['017']?.value.length, 4, reason: 'DAEX (Expiry) must be 4 chars');
+      expect(
+        msg.elements['001']?.value.length,
+        3,
+        reason: 'TM must be 3 chars',
+      );
+      expect(
+        msg.elements['002']?.value.length,
+        12,
+        reason: 'MT (Amount) must be 12 chars',
+      );
+      expect(
+        msg.elements['003']?.value.length,
+        7,
+        reason: 'NCAI (POS ID) must be 7 chars',
+      );
+      expect(
+        msg.elements['004']?.value.length,
+        6,
+        reason: 'NS (Sequence) must be 6 chars',
+      );
+      expect(
+        msg.elements['008']?.value.length,
+        6,
+        reason: 'STAN must be 6 chars',
+      );
+      expect(
+        msg.elements['012']?.value.length,
+        3,
+        reason: 'DE (Currency) must be 3 chars',
+      );
+      expect(
+        msg.elements['017']?.value.length,
+        4,
+        reason: 'DAEX (Expiry) must be 4 chars',
+      );
     });
 
     test('duplicateRequest builds correctly', () {

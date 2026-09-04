@@ -1,34 +1,77 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'tlv.dart';
 
 class NapsMessage {
   final Map<String, TlvElement> elements;
 
-  NapsMessage(this.elements);
+  /// True when the DP field was closed by the end of the buffer rather than by
+  /// its `?` terminator, i.e. the receipt is known to be short.
+  final bool dpTruncated;
+
+  /// The bytes this message was decoded from, when it came off the wire.
+  /// Retained so diagnostics can log what actually arrived rather than a
+  /// re-encoding of what was understood.
+  final Uint8List? rawFrame;
+
+  NapsMessage(this.elements, {this.dpTruncated = false, this.rawFrame});
 
   /// Creates a [NapsMessage] from a list of TLV elements.
-  factory NapsMessage.fromElements(List<TlvElement> list) {
+  factory NapsMessage.fromElements(
+    List<TlvElement> list, {
+    bool dpTruncated = false,
+    Uint8List? rawFrame,
+  }) {
     final map = <String, TlvElement>{};
     for (final elem in list) {
       map[elem.tag] = elem;
     }
-    return NapsMessage(map);
+    return NapsMessage(map, dpTruncated: dpTruncated, rawFrame: rawFrame);
   }
 
-  /// Parses a raw TLV frame into a [NapsMessage].
-  /// Decoded leniently: real EPT hardware can append trailing artifact bytes
-  /// after the last valid field, which must be ignored rather than rejected.
+  /// Builds a [NapsMessage] from a completed frame scan.
+  factory NapsMessage.fromScan(NapsFrameScan scan, Uint8List rawFrame) =>
+      NapsMessage.fromElements(
+        scan.elements,
+        dpTruncated: scan.dpTruncated,
+        rawFrame: rawFrame,
+      );
+
+  /// Parses a raw TLV frame held as a string.
+  ///
+  /// Prefer [NapsMessage.fromScan] for anything that came off the wire: TLV
+  /// lengths are byte counts and receipt text is accented, so decoding to a
+  /// string before measuring shifts every offset after the first accent.
   factory NapsMessage.fromFrame(String frame) {
-    final list = NapsTlv.decode(frame, strict: false);
-    return NapsMessage.fromElements(list);
+    final bytes = Uint8List.fromList(utf8.encode(frame));
+    final scan = NapsTlv.scanFrame(bytes);
+    if (scan.status == NapsScanStatus.malformed) {
+      return NapsMessage(const {});
+    }
+    return NapsMessage.fromElements(
+      scan.elements,
+      dpTruncated: scan.dpTruncated,
+      rawFrame: bytes,
+    );
   }
 
   /// Encodes this message into a raw TLV frame.
+  ///
+  /// Only ever call this on a message you built. Calling it on a *response*
+  /// re-encodes what was understood rather than what arrived, and the
+  /// mandatory-field check below will throw on a response that legitimately
+  /// omits DA or HE. Use [rawFrame] to see what the terminal actually sent.
   String toFrame() {
     validateMandatoryFields();
     // Return sorted elements by tag for consistency, though order doesn't matter
-    final sortedList = elements.values.toList()..sort((a, b) => a.tag.compareTo(b.tag));
+    final sortedList = elements.values.toList()
+      ..sort((a, b) => a.tag.compareTo(b.tag));
     return NapsTlv.encode(sortedList);
   }
+
+  /// The bytes to put on the wire.
+  Uint8List toFrameBytes() => Uint8List.fromList(utf8.encode(toFrame()));
 
   /// Validates that the 5 mandatory fields are present: TM, NCAI, NS, DA, HE.
   void validateMandatoryFields() {
@@ -42,7 +85,9 @@ class NapsMessage {
 
     for (final entry in mandatoryTags.entries) {
       if (!elements.containsKey(entry.key)) {
-        throw FormatException('Missing mandatory NAPS field: ${entry.value} (Tag ${entry.key})');
+        throw FormatException(
+          'Missing mandatory NAPS field: ${entry.value} (Tag ${entry.key})',
+        );
       }
     }
   }
@@ -85,8 +130,16 @@ class NapsMessage {
   /// NA (Tag 009) - Bank authorization number (6 chars)
   String get authorizationNumber => elements['009']?.value ?? '';
 
-  /// DP (Tag 010) - Printable receipt data (asterisk-separated lines)
+  /// DP (Tag 010) - Printable receipt data.
+  ///
+  /// Prefer [receiptDataBytes]: DP sub-tag lengths are byte counts.
   String get receiptData => elements['010']?.value ?? '';
+
+  /// DP (Tag 010) as the bytes the terminal sent.
+  Uint8List get receiptDataBytes => elements['010']?.valueBytes ?? Uint8List(0);
+
+  /// True when tag 010 is present and non-empty.
+  bool get hasReceipt => receiptDataBytes.isNotEmpty;
 
   /// CB (Tag 011) - Barcode
   String get barcode => elements['011']?.value ?? '';
@@ -135,7 +188,7 @@ class NapsMessage {
   }) {
     final dateVal = _formatDate(timestamp);
     final timeVal = _formatTime(timestamp);
-    
+
     return {
       '001': TlvElement('001', messageType.padLeft(3, '0')),
       '003': TlvElement('003', posId.padLeft(7, '0')),
@@ -177,11 +230,17 @@ class NapsMessage {
       timestamp: timestamp ?? DateTime.now(),
     );
 
-    elements['002'] = TlvElement('002', amountInCents.toString().padLeft(12, '0'));
+    elements['002'] = TlvElement(
+      '002',
+      amountInCents.toString().padLeft(12, '0'),
+    );
     elements['012'] = TlvElement('012', currencyCode.padLeft(3, '0'));
 
     if (sequenceNumberToCancel != null) {
-      elements['005'] = TlvElement('005', sequenceNumberToCancel.toString().padLeft(6, '0'));
+      elements['005'] = TlvElement(
+        '005',
+        sequenceNumberToCancel.toString().padLeft(6, '0'),
+      );
     }
 
     return NapsMessage(elements);
@@ -201,11 +260,15 @@ class NapsMessage {
     final elements = _createBaseElements(
       messageType: '002',
       posId: posId,
-      sequenceNumber: sequenceNumber, // Must be identical to the NS of the payment request
+      sequenceNumber:
+          sequenceNumber, // Must be identical to the NS of the payment request
       timestamp: timestamp ?? DateTime.now(),
     );
 
-    elements['002'] = TlvElement('002', amountInCents.toString().padLeft(12, '0'));
+    elements['002'] = TlvElement(
+      '002',
+      amountInCents.toString().padLeft(12, '0'),
+    );
     elements['012'] = TlvElement('012', currencyCode.padLeft(3, '0'));
     elements['008'] = TlvElement('008', stan.padLeft(6, '0'));
     elements['007'] = TlvElement('007', cardMasked);
@@ -236,7 +299,8 @@ class NapsMessage {
   /// TM 004 - Cancellation Confirmation Request
   factory NapsMessage.cancellationConfirmationRequest({
     required String posId,
-    required int sequenceNumber, // Identical to the NS of the cancellation request (TM 003)
+    required int
+    sequenceNumber, // Identical to the NS of the cancellation request (TM 003)
     required String stan,
     required int amountInCents,
     required String currencyCode,
@@ -252,7 +316,10 @@ class NapsMessage {
     );
 
     elements['008'] = TlvElement('008', stan.padLeft(6, '0'));
-    elements['002'] = TlvElement('002', amountInCents.toString().padLeft(12, '0'));
+    elements['002'] = TlvElement(
+      '002',
+      amountInCents.toString().padLeft(12, '0'),
+    );
     elements['012'] = TlvElement('012', currencyCode.padLeft(3, '0'));
     elements['018'] = TlvElement('018', transactionDate);
     elements['019'] = TlvElement('019', transactionTime);
@@ -285,12 +352,14 @@ class NapsMessage {
     required int sequenceNumber,
     DateTime? timestamp,
   }) {
-    return NapsMessage(_createBaseElements(
-      messageType: '009',
-      posId: posId,
-      sequenceNumber: sequenceNumber,
-      timestamp: timestamp ?? DateTime.now(),
-    ));
+    return NapsMessage(
+      _createBaseElements(
+        messageType: '009',
+        posId: posId,
+        sequenceNumber: sequenceNumber,
+        timestamp: timestamp ?? DateTime.now(),
+      ),
+    );
   }
 
   /// TM 010 - Payment Totals Statement Request
@@ -299,12 +368,14 @@ class NapsMessage {
     required int sequenceNumber,
     DateTime? timestamp,
   }) {
-    return NapsMessage(_createBaseElements(
-      messageType: '010',
-      posId: posId,
-      sequenceNumber: sequenceNumber,
-      timestamp: timestamp ?? DateTime.now(),
-    ));
+    return NapsMessage(
+      _createBaseElements(
+        messageType: '010',
+        posId: posId,
+        sequenceNumber: sequenceNumber,
+        timestamp: timestamp ?? DateTime.now(),
+      ),
+    );
   }
 
   /// TM 011 - Print Information Request
@@ -332,12 +403,14 @@ class NapsMessage {
     required int sequenceNumber,
     DateTime? timestamp,
   }) {
-    return NapsMessage(_createBaseElements(
-      messageType: '012',
-      posId: posId,
-      sequenceNumber: sequenceNumber,
-      timestamp: timestamp ?? DateTime.now(),
-    ));
+    return NapsMessage(
+      _createBaseElements(
+        messageType: '012',
+        posId: posId,
+        sequenceNumber: sequenceNumber,
+        timestamp: timestamp ?? DateTime.now(),
+      ),
+    );
   }
 
   /// TM 013 - Referencing Order Request (Merchant Parameters Load)

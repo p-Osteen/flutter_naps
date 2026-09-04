@@ -1,15 +1,12 @@
+import 'dart:convert';
+import 'dart:developer' as developer;
+import 'dart:typed_data';
+
 import 'tlv.dart';
 
-enum NapsPrintFormat {
-  simple,
-  bold,
-}
+enum NapsPrintFormat { simple, bold }
 
-enum NapsAlignment {
-  left,
-  center,
-  right,
-}
+enum NapsAlignment { left, center, right }
 
 class NapsReceiptLine {
   final int lineNumber;
@@ -39,26 +36,26 @@ class NapsReceiptLine {
 
   @override
   int get hashCode =>
-      lineNumber.hashCode ^ format.hashCode ^ alignment.hashCode ^ text.hashCode;
+      lineNumber.hashCode ^
+      format.hashCode ^
+      alignment.hashCode ^
+      text.hashCode;
 }
 
 class NapsReceipt {
   final List<NapsReceiptLine> lines;
 
-  NapsReceipt(this.lines);
+  /// True when the DP payload ended without its `?` terminator, i.e. the
+  /// receipt this object carries is known to be short. Callers that print
+  /// legally significant copies should surface this rather than ignore it.
+  final bool isTruncated;
+
+  NapsReceipt(this.lines, {this.isTruncated = false});
 
   /// Extracts named fields from receipt text lines.
   ///
   /// Scans each line for `Key: Value` or `Key : Value` patterns and returns
-  /// a map of lowercase-normalised keys to their values. Common fields
-  /// include `"merchant id"`, `"terminal id"`, `"stan"`, etc.
-  ///
-  /// Example:
-  /// ```dart
-  /// final fields = receipt.extractFields();
-  /// final merchantId = fields['merchant id'];
-  /// final terminalId = fields['terminal id'];
-  /// ```
+  /// a map of lowercase-normalised keys to their values.
   Map<String, String> extractFields() {
     final fields = <String, String>{};
     final pattern = RegExp(r'^(.+?)\s*:\s*(.+)$');
@@ -71,75 +68,175 @@ class NapsReceipt {
     return fields;
   }
 
-  /// Parses raw receipt data (Tag 010) into a [NapsReceipt].
-  /// Format is: line1*line2*line3?
-  /// Each line is a concatenated TLV stream of sub-tags:
-  /// - Tag 030 (DP1): line number
-  /// - Tag 031 (DP2): format ('S' or 'G')
-  /// - Tag 032 (DP3): alignment ('G' = left, 'C' = center, 'D' = right)
-  /// - Tag 033 (DP4): text
-  factory NapsReceipt.parse(String rawData) {
-    if (rawData.isEmpty) {
-      return NapsReceipt([]);
+  /// Values the terminal prints on the receipt but does not always return as
+  /// a TLV field of its own.
+  ///
+  /// Observed on 3 September 2026: approved payments carried the
+  /// authorisation number only on the printed receipt
+  /// (`N° Autorisation : 854667`), so a POS relying on tag 009 alone records
+  /// nothing. These lookups let a caller fall back to the receipt.
+  ///
+  /// Keys are matched case-insensitively and accent-insensitively against the
+  /// start of the label, so both the French and English wordings resolve.
+  static const Map<String, List<String>> _fieldAliases = {
+    'authorisationNumber': ['n autorisation', 'no autorisation', 'authorization', 'authorisation', 'auth'],
+    'merchantNumber': ['n commercant', 'no commercant', 'merchant id', 'merchant'],
+    'terminalNumber': ['n terminal', 'no terminal', 'terminal id', 'terminal'],
+    'transactionNumber': ['n transaction', 'no transaction', 'transaction'],
+    'stan': ['n stan', 'stan'],
+    'amount': ['montant', 'amount', 'total'],
+  };
+
+  static String _normaliseKey(String raw) {
+    const from = 'àâäçéèêëîïôöùûüÿ°';
+    const to = 'aaaceeeeiioouuuy ';
+    final buffer = StringBuffer();
+    for (final rune in raw.toLowerCase().runes) {
+      final ch = String.fromCharCode(rune);
+      final i = from.indexOf(ch);
+      buffer.write(i >= 0 ? to[i] : ch);
     }
+    return buffer
+        .toString()
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  /// Looks up one of [_fieldAliases] in the receipt text.
+  ///
+  /// Returns null when the receipt does not carry it, so a caller can prefer
+  /// a TLV field when present and fall back to this when it is not.
+  String? field(String name) {
+    final aliases = _fieldAliases[name];
+    if (aliases == null) return null;
+    for (final entry in extractFields().entries) {
+      final key = _normaliseKey(entry.key);
+      for (final alias in aliases) {
+        if (key == alias || key.startsWith('$alias ') || key.startsWith(alias)) {
+          final value = entry.value.trim();
+          if (value.isNotEmpty) return value;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Authorisation number as printed on the receipt, when present.
+  String? get authorisationNumber => field('authorisationNumber');
+
+  /// Merchant number as printed on the receipt, when present.
+  String? get merchantNumber => field('merchantNumber');
+
+  /// Terminal number as printed on the receipt, when present.
+  String? get terminalNumber => field('terminalNumber');
+
+  /// Parses raw receipt data (tag 010) held as a string.
+  ///
+  /// Prefer [NapsReceipt.parseBytes]: DP sub-tag lengths are byte counts, and
+  /// the receipt text is accented French, so string offsets drift.
+  factory NapsReceipt.parse(String rawData) =>
+      NapsReceipt.parseBytes(Uint8List.fromList(utf8.encode(rawData)));
+
+  /// Parses raw receipt data (tag 010) from the bytes the terminal sent.
+  ///
+  /// The payload is a chain of printable lines, each built from four
+  /// sub-TLVs — DP1 (030, line number), DP2 (031, format), DP3 (032,
+  /// alignment) and DP4 (033, text) — separated by `*`, the last one closed
+  /// by `?`.
+  ///
+  /// The parse is driven entirely by the declared sub-tag lengths. It never
+  /// splits the payload on `*` first, because DP4 *content* legitimately
+  /// contains asterisks — masked PANs such as `5321****5556`, rules of stars,
+  /// decorative banners — and splitting on them fabricates one segment per
+  /// asterisk while destroying the line each came from.
+  factory NapsReceipt.parseBytes(Uint8List raw) {
+    if (raw.isEmpty) return NapsReceipt(const []);
 
     final lines = <NapsReceiptLine>[];
-    
-    // Split the raw string by '*'
-    final segments = rawData.split('*');
+    var p = 0;
+    var terminated = false;
 
-    for (var i = 0; i < segments.length; i++) {
-      var segment = segments[i].trim();
-      if (segment.isEmpty) continue;
+    while (p < raw.length) {
+      final fields = <String, Uint8List>{};
+      var read = 0;
 
-      bool isLast = false;
-      
-      final questionMarkIdx = segment.indexOf('?');
-      if (questionMarkIdx != -1) {
-        isLast = true;
-        segment = segment.substring(0, questionMarkIdx);
+      while (read < kDpSubTags.length) {
+        if (p < raw.length &&
+            (raw[p] == kDpSeparator || raw[p] == kDpTerminator)) {
+          break;
+        }
+        if (p + 6 > raw.length) break;
+        final tag = String.fromCharCodes(raw, p, p + 3);
+        if (!kDpSubTags.contains(tag)) break;
+        final len = _int3(raw, p + 3);
+        if (len == null || p + 6 + len > raw.length) break;
+        fields[tag] = Uint8List.fromList(raw.sublist(p + 6, p + 6 + len));
+        p += 6 + len;
+        read++;
       }
 
-      if (segment.isEmpty) {
-        if (isLast) break;
-        continue;
+      if (read == 0) {
+        developer.log(
+          'Unparseable DP segment at offset $p; stopping receipt parse',
+          name: 'NapsReceipt',
+        );
+        break;
       }
 
-      try {
-        final elements = NapsTlv.decode(segment);
-        final map = {for (var e in elements) e.tag: e.value};
+      lines.add(
+        NapsReceiptLine(
+          lineNumber: int.tryParse(_text(fields['030'])) ?? 0,
+          format: _text(fields['031']) == 'G'
+              ? NapsPrintFormat.bold
+              : NapsPrintFormat.simple,
+          alignment: _alignment(_text(fields['032'])),
+          // Deliberately not trimmed: leading and trailing spaces are how the
+          // terminal centres and pads a 24-column line.
+          text: _text(fields['033']),
+        ),
+      );
 
-        final lineNumStr = map['030'] ?? '0';
-        final lineNum = int.tryParse(lineNumStr) ?? 0;
-
-        final formatChar = map['031'] ?? 'S';
-        final format = formatChar == 'G' ? NapsPrintFormat.bold : NapsPrintFormat.simple;
-
-        final alignChar = map['032'] ?? 'G';
-        final alignment = alignChar == 'C'
-            ? NapsAlignment.center
-            : alignChar == 'D'
-                ? NapsAlignment.right
-                : NapsAlignment.left;
-
-        final text = map['033'] ?? '';
-
-        lines.add(NapsReceiptLine(
-          lineNumber: lineNum,
-          format: format,
-          alignment: alignment,
-          text: text,
-        ));
-      } catch (e) {
-        // Skip or rethrow on individual malformed line parsing errors
-        // We log and skip to be robust, but we can throw if formatting is strictly verified
+      if (p >= raw.length) break;
+      final sep = raw[p];
+      p++;
+      if (sep == kDpTerminator) {
+        terminated = true;
+        break;
       }
-
-      if (isLast) {
+      if (sep != kDpSeparator) {
+        developer.log(
+          'Unexpected DP separator 0x${sep.toRadixString(16)} at offset ${p - 1}',
+          name: 'NapsReceipt',
+        );
         break;
       }
     }
 
-    return NapsReceipt(lines);
+    return NapsReceipt(lines, isTruncated: !terminated);
+  }
+
+  static NapsAlignment _alignment(String raw) {
+    switch (raw) {
+      case 'C':
+        return NapsAlignment.center;
+      case 'D':
+        return NapsAlignment.right;
+      default:
+        return NapsAlignment.left;
+    }
+  }
+
+  static String _text(Uint8List? bytes) =>
+      bytes == null ? '' : utf8.decode(bytes, allowMalformed: true);
+
+  static int? _int3(Uint8List b, int i) {
+    var n = 0;
+    for (var k = i; k < i + 3; k++) {
+      final c = b[k];
+      if (c < 0x30 || c > 0x39) return null;
+      n = n * 10 + (c - 0x30);
+    }
+    return n;
   }
 }

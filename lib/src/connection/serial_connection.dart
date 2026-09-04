@@ -1,27 +1,42 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:flutter_libserialport/flutter_libserialport.dart';
+
 import '../protocol/message.dart';
 import 'connection.dart';
+import 'frame_buffer.dart';
 
-/// Concrete implementation of [NapsConnection] using serial/USB-C COM port.
+/// Concrete implementation of [NapsConnection] over a USB-C / COM port.
 class NapsSerialConnection implements NapsConnection {
   final String portName;
   final int baudRate;
   final Duration defaultTimeout;
 
+  /// Receives every frame in and out, already redacted. See [NapsFrameLog].
+  final NapsFrameLogger? onFrame;
+
   SerialPort? _port;
   SerialPortReader? _reader;
-  String _receiveBuffer = '';
+  final NapsFrameBuffer _buffer = NapsFrameBuffer();
   Completer<NapsMessage>? _completer;
   StreamSubscription<Uint8List>? _subscription;
+  Timer? _settleTimer;
+
+  /// The spec does not state a line rate for the USB-C link; 9600 is the
+  /// value the terminals have been observed to use. Configurable because it
+  /// has to be confirmed with NAPS per point of sale.
+  static const int defaultBaudRate = 9600;
 
   NapsSerialConnection({
     required this.portName,
-    this.baudRate = 9600,
+    this.baudRate = defaultBaudRate,
     this.defaultTimeout = const Duration(seconds: 30),
+    this.onFrame,
   });
+
+  @override
+  String get transportDescription => 'usb $portName@$baudRate';
 
   @override
   bool get isConnected => _port != null && _port!.isOpen;
@@ -42,7 +57,7 @@ class NapsSerialConnection implements NapsConnection {
         ..parity = SerialPortParity.none;
       _port!.config = config;
 
-      _receiveBuffer = '';
+      _buffer.clear();
       _reader = SerialPortReader(_port!);
       _subscription = _reader!.stream.listen(
         _onData,
@@ -51,7 +66,7 @@ class NapsSerialConnection implements NapsConnection {
         cancelOnError: true,
       );
       return true;
-    } catch (e) {
+    } catch (_) {
       await disconnect();
       return false;
     }
@@ -59,6 +74,8 @@ class NapsSerialConnection implements NapsConnection {
 
   @override
   Future<void> disconnect() async {
+    _settleTimer?.cancel();
+    _settleTimer = null;
     await _subscription?.cancel();
     _subscription = null;
     _reader = null;
@@ -68,11 +85,12 @@ class NapsSerialConnection implements NapsConnection {
       }
     } catch (_) {}
     _port = null;
-    _receiveBuffer = '';
+    _buffer.clear();
 
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.completeError(Exception('Serial connection closed.'));
-      _completer = null;
+    final pending = _completer;
+    _completer = null;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(Exception('Serial connection closed.'));
     }
   }
 
@@ -81,9 +99,9 @@ class NapsSerialConnection implements NapsConnection {
     if (!isConnected) {
       throw Exception('Cannot send message, serial port is not open.');
     }
-    final frame = message.toFrame();
-    final bytes = utf8.encode(frame);
-    final written = _port!.write(Uint8List.fromList(bytes));
+    final bytes = message.toFrameBytes();
+    onFrame?.call(NapsFrameLog.of(NapsFrameDirection.outbound, bytes));
+    final written = _port!.write(bytes);
     if (written < 0) {
       throw Exception('Failed to write to NAPS serial port.');
     }
@@ -95,17 +113,16 @@ class NapsSerialConnection implements NapsConnection {
       throw Exception('Cannot receive message, serial port is not open.');
     }
 
-    // Check if we already have a complete frame in the buffer
-    final parsedMsg = _tryParseFrameFromBuffer();
-    if (parsedMsg != null) {
-      return parsedMsg;
-    }
-
+    // Single-flight; see the note in NapsTcpConnection.receive.
     if (_completer != null && !_completer!.isCompleted) {
-      _completer!.completeError(
-        StateError('New receive request registered, old one cancelled.'),
+      throw StateError(
+        'A receive is already pending on this NAPS connection; '
+        'operations must be serialised.',
       );
     }
+
+    final buffered = _takeNow();
+    if (buffered != null) return buffered;
 
     final completer = Completer<NapsMessage>();
     _completer = completer;
@@ -115,82 +132,86 @@ class NapsSerialConnection implements NapsConnection {
     return completer.future.timeout(
       effectiveTimeout,
       onTimeout: () {
-        if (_completer == completer) {
-          _completer = null;
-        }
+        if (_completer == completer) _completer = null;
+        final salvaged = _takeNow(salvage: true);
+        if (salvaged != null) return salvaged;
         throw TimeoutException(
-          'Timed out waiting for NAPS response over serial after $effectiveTimeout.',
+          'Timed out waiting for NAPS response over serial after '
+          '$effectiveTimeout (${_buffer.length} bytes buffered).',
         );
       },
     );
   }
 
-  void _onData(Uint8List data) {
-    try {
-      final text = utf8.decode(data);
-      _receiveBuffer += text;
+  /// A NAPS frame carries no delimiter, so a response with no DP terminator is
+  /// only "complete" by inference from its envelope. Letting the stream settle
+  /// for a beat before acting on one costs nothing and closes the race where a
+  /// frame split across segments is delivered with its later fields missing.
+  static const Duration _undelimitedSettle = Duration(milliseconds: 120);
 
-      final message = _tryParseFrameFromBuffer();
-      if (message != null) {
-        if (_completer != null && !_completer!.isCompleted) {
-          _completer!.complete(message);
-          _completer = null;
-        }
-      }
-    } catch (e) {
-      _onError(e);
+  /// Takes a frame that is already buffered. Used on entry to [receive], where
+  /// the bytes arrived before the caller asked for them, and on the timeout
+  /// path with [salvage] set.
+  NapsMessage? _takeNow({bool salvage = false}) {
+    final peek = _buffer.peekFrame(allowUnterminatedDp: salvage);
+    if (peek == null) return null;
+    _buffer.commit(peek.end);
+    final raw = peek.message.rawFrame;
+    if (raw != null) {
+      onFrame?.call(NapsFrameLog.of(NapsFrameDirection.inbound, raw));
     }
+    return peek.message;
   }
 
-  void _onError(dynamic error) {
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.completeError(error);
-      _completer = null;
+  /// Called as bytes arrive. Delivers to a waiting [receive] once the frame
+  /// looks whole, deferring undelimited frames by [_undelimitedSettle].
+  void _tryDeliver({bool settled = false}) {
+    final pending = _completer;
+    if (pending == null || pending.isCompleted) {
+      // Nothing is waiting yet. Leave the frame buffered so the next
+      // receive() picks it up rather than dropping it on the floor.
+      return;
+    }
+
+    final peek = _buffer.peekFrame();
+    if (peek == null) return;
+
+    if (!peek.delimited && !settled) {
+      _settleTimer?.cancel();
+      _settleTimer = Timer(
+        _undelimitedSettle,
+        () => _tryDeliver(settled: true),
+      );
+      return;
+    }
+
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    _buffer.commit(peek.end);
+    final raw = peek.message.rawFrame;
+    if (raw != null) {
+      onFrame?.call(NapsFrameLog.of(NapsFrameDirection.inbound, raw));
+    }
+    _completer = null;
+    pending.complete(peek.message);
+  }
+
+  void _onData(Uint8List data) {
+    _buffer.add(data);
+    _tryDeliver();
+  }
+
+  void _onError(Object error) {
+    final pending = _completer;
+    _completer = null;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(error);
     }
     disconnect();
   }
 
   void _onDone() {
     disconnect();
-  }
-
-  NapsMessage? _tryParseFrameFromBuffer() {
-    if (_receiveBuffer.isEmpty) return null;
-
-    final frameLen = _getExpectedFrameLength(_receiveBuffer);
-    if (frameLen > 0) {
-      final frameText = _receiveBuffer.substring(0, frameLen);
-      _receiveBuffer = _receiveBuffer.substring(frameLen);
-
-      try {
-        return NapsMessage.fromFrame(frameText);
-      } catch (_) {
-        return null;
-      }
-    }
-    return null;
-  }
-
-  int _getExpectedFrameLength(String text) {
-    int index = 0;
-    while (index < text.length) {
-      if (index + 6 > text.length) {
-        // Real EPT hardware can append trailing artifact bytes after the
-        // last valid field; once we've parsed something, treat the rest as
-        // garbage to discard rather than waiting forever for more data.
-        return index > 0 ? text.length : -1;
-      }
-      final lenStr = text.substring(index + 3, index + 6);
-      final len = int.tryParse(lenStr);
-      if (len == null) {
-        return index > 0 ? text.length : -1; // Malformed/artifact tag
-      }
-      if (index + 6 + len > text.length) {
-        return -1; // Incomplete value string
-      }
-      index += 6 + len;
-    }
-    return index; // Valid frame consumed up to this index
   }
 
   @override

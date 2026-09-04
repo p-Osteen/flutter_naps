@@ -16,7 +16,7 @@ void main() {
       // Tag 033 (DP4), length 007, value "WELCOME"
       final raw = '03000201031001S032001C033007WELCOME';
       final receipt = NapsReceipt.parse(raw);
-      
+
       expect(receipt.lines.length, 1);
       final line = receipt.lines.first;
       expect(line.lineNumber, 1);
@@ -40,11 +40,12 @@ void main() {
     test('parse multi-line receipt', () {
       // Line 1: 01, simple, center, "CHICKEN"
       // Line 2: 02, bold, left, "TOTAL: 100"
-      final raw = '03000201031001S032001C033007CHICKEN*03000202031001G032001G033010TOTAL: 100?';
+      final raw =
+          '03000201031001S032001C033007CHICKEN*03000202031001G032001G033010TOTAL: 100?';
       final receipt = NapsReceipt.parse(raw);
 
       expect(receipt.lines.length, 2);
-      
+
       expect(receipt.lines[0].lineNumber, 1);
       expect(receipt.lines[0].format, NapsPrintFormat.simple);
       expect(receipt.lines[0].alignment, NapsAlignment.center);
@@ -57,28 +58,90 @@ void main() {
     });
 
     test('ignores extra content after terminator', () {
-      final raw = '03000201031001S032001C033002OK?*03000202031001S032001C033006IGNORE';
+      final raw =
+          '03000201031001S032001C033002OK?*03000202031001S032001C033006IGNORE';
       final receipt = NapsReceipt.parse(raw);
       expect(receipt.lines.length, 1);
       expect(receipt.lines.first.text, 'OK');
     });
 
-    test('skips malformed line segments gracefully', () {
+    test('stops at a malformed segment rather than guessing', () {
+      // The parse is length-driven, so it cannot resynchronise on '*' — that
+      // is the whole point: '*' occurs inside legitimate line text. A DP that
+      // does not start with a DP1 sub-tag is a protocol violation, and half a
+      // payment receipt is worse than none.
       final raw = 'malformed_garbage*03000201031001S032001C033002OK?';
       final receipt = NapsReceipt.parse(raw);
+      expect(receipt.lines, isEmpty);
+      expect(receipt.isTruncated, isTrue);
+    });
+
+    test('an asterisk inside the line text does not split the line', () {
+      // A masked PAN is the common case; the old split('*') parser turned
+      // this single line into five fragments and lost all of them.
+      final raw = '03000201031001S032001G033019CARTE: 5321****5556?';
+      final receipt = NapsReceipt.parse(raw);
       expect(receipt.lines.length, 1);
-      expect(receipt.lines.first.text, 'OK');
+      expect(receipt.lines.first.text, 'CARTE: 5321****5556');
+      expect(receipt.isTruncated, isFalse);
+    });
+
+    test('accented text keeps its byte alignment', () {
+      // 033 declares 27 BYTES; the string is 25 UTF-16 code units. Measuring
+      // in code units drifts by two and eats the terminator.
+      const text = 'Conservez-moi, je peux etre';
+      const accented = 'Opération réussie';
+      final raw =
+          '03000201031001S032001G033027$text'
+          '*03000202031001S032001C033019$accented?';
+      final receipt = NapsReceipt.parse(raw);
+      expect(receipt.lines.length, 2);
+      expect(receipt.lines[0].text, text);
+      expect(receipt.lines[1].text, accented);
+    });
+
+    test('trailing spaces in line text are preserved', () {
+      // Padding is how the terminal aligns a 24-column line; trimming it
+      // silently changes what gets printed.
+      final raw = '03000201031001S032001G033008OK      ?';
+      final receipt = NapsReceipt.parse(raw);
+      expect(receipt.lines.single.text, 'OK      ');
     });
   });
 
   group('NapsReceipt.extractFields Tests', () {
     test('extracts Merchant ID and Terminal ID from receipt lines', () {
       final receipt = NapsReceipt([
-        NapsReceiptLine(lineNumber: 1, format: NapsPrintFormat.bold, alignment: NapsAlignment.center, text: 'CHICKEN ARABIA'),
-        NapsReceiptLine(lineNumber: 2, format: NapsPrintFormat.simple, alignment: NapsAlignment.left, text: 'Merchant ID: 20000'),
-        NapsReceiptLine(lineNumber: 3, format: NapsPrintFormat.simple, alignment: NapsAlignment.left, text: 'Terminal ID: 88398363'),
-        NapsReceiptLine(lineNumber: 4, format: NapsPrintFormat.simple, alignment: NapsAlignment.left, text: 'STAN: 000098'),
-        NapsReceiptLine(lineNumber: 5, format: NapsPrintFormat.simple, alignment: NapsAlignment.center, text: 'APPROVED'),
+        NapsReceiptLine(
+          lineNumber: 1,
+          format: NapsPrintFormat.bold,
+          alignment: NapsAlignment.center,
+          text: 'CHICKEN ARABIA',
+        ),
+        NapsReceiptLine(
+          lineNumber: 2,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.left,
+          text: 'Merchant ID: 20000',
+        ),
+        NapsReceiptLine(
+          lineNumber: 3,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.left,
+          text: 'Terminal ID: 88398363',
+        ),
+        NapsReceiptLine(
+          lineNumber: 4,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.left,
+          text: 'STAN: 000098',
+        ),
+        NapsReceiptLine(
+          lineNumber: 5,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.center,
+          text: 'APPROVED',
+        ),
       ]);
 
       final fields = receipt.extractFields();
@@ -93,8 +156,18 @@ void main() {
 
     test('keys are normalised to lowercase', () {
       final receipt = NapsReceipt([
-        NapsReceiptLine(lineNumber: 1, format: NapsPrintFormat.simple, alignment: NapsAlignment.left, text: 'MERCHANT ID: 12345'),
-        NapsReceiptLine(lineNumber: 2, format: NapsPrintFormat.simple, alignment: NapsAlignment.left, text: 'Terminal Id : 99999'),
+        NapsReceiptLine(
+          lineNumber: 1,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.left,
+          text: 'MERCHANT ID: 12345',
+        ),
+        NapsReceiptLine(
+          lineNumber: 2,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.left,
+          text: 'Terminal Id : 99999',
+        ),
       ]);
 
       final fields = receipt.extractFields();
@@ -108,8 +181,18 @@ void main() {
 
     test('returns empty map for receipt with no key:value lines', () {
       final receipt = NapsReceipt([
-        NapsReceiptLine(lineNumber: 1, format: NapsPrintFormat.bold, alignment: NapsAlignment.center, text: 'APPROVED'),
-        NapsReceiptLine(lineNumber: 2, format: NapsPrintFormat.simple, alignment: NapsAlignment.center, text: '***'),
+        NapsReceiptLine(
+          lineNumber: 1,
+          format: NapsPrintFormat.bold,
+          alignment: NapsAlignment.center,
+          text: 'APPROVED',
+        ),
+        NapsReceiptLine(
+          lineNumber: 2,
+          format: NapsPrintFormat.simple,
+          alignment: NapsAlignment.center,
+          text: '***',
+        ),
       ]);
 
       final fields = receipt.extractFields();

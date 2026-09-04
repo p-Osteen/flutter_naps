@@ -9,10 +9,7 @@ void main() {
     });
 
     test('encode multiple TLV elements', () {
-      final elements = [
-        TlvElement('001', '001'),
-        TlvElement('003', '1234567'),
-      ];
+      final elements = [TlvElement('001', '001'), TlvElement('003', '1234567')];
       expect(NapsTlv.encode(elements), '0010030010030071234567');
     });
 

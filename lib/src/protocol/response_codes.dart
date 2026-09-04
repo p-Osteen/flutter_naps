@@ -1,8 +1,4 @@
-enum NapsResponseStatus {
-  approved,
-  declined,
-  error,
-}
+enum NapsResponseStatus { approved, declined, error }
 
 class NapsResponseMetadata {
   final String code;
@@ -151,15 +147,32 @@ class NapsResponseCodes {
     ),
   };
 
+  /// True when this code has a documented meaning in the NAPS Integration
+  /// Guide §7.
+  ///
+  /// NAPS confirmed in writing (KioskServe, 3 September 2026) that codes
+  /// outside the documented cases must be "logged and returned as received by
+  /// the terminal rather than assigned an assumed meaning at application
+  /// level". Callers use this to tell the two apart rather than guessing.
+  static bool isDocumented(String code) => _codes.containsKey(code);
+
   /// Looks up metadata for a response code.
   /// Per NAPS Integration Guide §7: "Code 000 (and its variants 001/003/007)
   /// always signifies success; any other code should be treated as a failure."
+  ///
+  /// Codes NOT in this map (e.g. 995, 280, 328) are **intentionally absent**
+  /// because they are not documented in the NAPS Integration Guide §7. They
+  /// have been observed in production terminal responses but have no official
+  /// meaning from NAPS. The SDK treats them as generic `declined` via the
+  /// fallback below. The app layer handles user-facing messages for these codes
+  /// in `PaymentController._getMappedErrorMessage()`.
   static NapsResponseMetadata lookup(String code) {
     final metadata = _codes[code];
     if (metadata != null) {
       return metadata;
     }
 
+    // Generic fallback for any response code not in the NAPS Integration Guide.
     return NapsResponseMetadata(
       code: code,
       status: NapsResponseStatus.declined,

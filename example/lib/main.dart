@@ -29,14 +29,19 @@ class NapsHomePage extends StatefulWidget {
 }
 
 class _NapsHomePageState extends State<NapsHomePage> {
-  final TextEditingController _ipController = TextEditingController(text: '192.168.1.26');
+  final TextEditingController _ipController = TextEditingController(
+    text: '192.168.1.26',
+  );
   final List<String> _logs = [];
   bool _isProcessing = false;
 
   void _log(String message) {
     if (!mounted) return;
     setState(() {
-      _logs.insert(0, '${DateTime.now().toLocal().toString().split('.').first}: $message');
+      _logs.insert(
+        0,
+        '${DateTime.now().toLocal().toString().split('.').first}: $message',
+      );
     });
   }
 
@@ -53,31 +58,59 @@ class _NapsHomePageState extends State<NapsHomePage> {
 
     try {
       _log('Connecting to $ip:4444...');
-      final connection = NapsTcpConnection(host: ip, port: 4444);
+      final connection = NapsTcpConnection(
+        host: ip,
+        port: 4444,
+        // Every frame in and out, with cardholder fields already masked.
+        onFrame: (frame) => _log('$frame'),
+      );
       final sdk = NapsSdk(
         connection: connection,
-        posId: '0030007', // 7 chars: cash register (3) + cashier (4)
+        posId: '0030007', // 7 digits: POS number (2) + cashier station (5)
+        // In a real deployment pass a durable store: NS must advance across
+        // transactions and restarts, not just within one.
+        sequenceStore: InMemoryNapsSequenceStore(),
       );
 
+      if (!await connection.connect()) {
+        _log('Could not reach the terminal at $ip:4444');
+        return;
+      }
+
       _log('Sending Payment Request (35.00 MAD)...');
+      // Nothing slow goes in onApproved: the terminal cancels the transaction
+      // if TM 002 does not reach it within 40 seconds. Print from the result
+      // after pay() returns instead.
       final response = await sdk.pay(
         amountInCents: 3500, // 35.00 MAD
         autoConfirm: true,
-        onApproved: (result) async {
-          _log('Payment Approved! STAN: ${result.stan}');
-          if (result.merchantReceipt != null) {
-            _log('Merchant Receipt received (${result.merchantReceipt!.lines.length} lines).');
-          }
-        },
       );
 
       if (response.isSuccess) {
-        _log('Transaction completed successfully!');
-        if (response.customerReceipt != null) {
-          _log('Customer Receipt received.');
-        }
+        _log(
+          'Approved and confirmed. STAN ${response.stan}, NS ${response.sequenceNumber}',
+        );
+        _log(
+          'Merchant copy: ${response.merchantReceipt?.lines.length ?? 0} lines',
+        );
+        _log(
+          'Customer copy: ${response.customerReceipt?.lines.length ?? 0} lines',
+        );
+      } else if (response.requiresReconciliation) {
+        // The card was approved but the confirmation did not land. This is
+        // not a decline: the money may have moved.
+        _log('APPROVED BUT NOT CONFIRMED — reconcile this transaction.');
+        _log('  NS ${response.sequenceNumber}  STAN ${response.stan}');
+        _log(
+          '  payment CR ${response.responseCode}, '
+          'confirmation CR ${response.confirmationResponseCode}',
+        );
+        _log('  reason: ${response.failureReason.name}');
       } else {
-        _log('Transaction failed: ${response.responseCode} - ${response.userMessage}');
+        _log(
+          'Not completed: ${response.responseCode} '
+          '(${response.failureReason.name}) - ${response.userMessage}',
+        );
       }
     } catch (e) {
       _log('Error: $e');
@@ -100,17 +133,25 @@ class _NapsHomePageState extends State<NapsHomePage> {
 
     try {
       final connection = NapsTcpConnection(host: ip, port: 4444);
-      final sdk = NapsSdk(
-        connection: connection,
-        posId: '0030007',
-      );
+      final sdk = NapsSdk(connection: connection, posId: '0030007');
+
+      if (!await connection.connect()) {
+        _log('Could not reach the terminal at $ip:4444');
+        return;
+      }
 
       _log('Requesting Totals...');
-      final receipt = await sdk.getTotals();
-      if (receipt != null) {
-        _log('Totals receipt received! (${receipt.lines.length} lines)');
+      final totals = await sdk.getTotals();
+      if (totals.isSuccess) {
+        _log(
+          'Totals receipt received (${totals.receipt?.lines.length ?? 0} lines)',
+        );
       } else {
-        _log('No totals returned or request failed.');
+        // The result says *why*, rather than collapsing everything to null.
+        _log(
+          'No totals: CR ${totals.responseCode} '
+          '(${totals.failureReason.name}) — ${totals.description}',
+        );
       }
     } catch (e) {
       _log('Error: $e');
@@ -164,7 +205,10 @@ class _NapsHomePageState extends State<NapsHomePage> {
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(Icons.payment),
                       label: const Text('Pay 35.00 MAD'),
