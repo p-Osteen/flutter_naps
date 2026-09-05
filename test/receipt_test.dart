@@ -90,8 +90,8 @@ void main() {
       // Spec III.2.1: LENGTH is the number of characters. 'Opération réussie'
       // is 17 characters and 19 UTF-8 bytes, so a byte-driven reader stops two
       // short, mid-character, and loses the rest of the receipt.
-      const plain = 'Conservez-moi, je peux etre';   // 27, ASCII
-      const accented = 'Opération réussie';          // 17 chars / 19 bytes
+      const plain = 'Conservez-moi, je peux etre'; // 27, ASCII
+      const accented = 'Opération réussie'; // 17 chars / 19 bytes
       final raw =
           '03000201031001S032001G033027$plain'
           '*03000202031001S032001C033017$accented?';
