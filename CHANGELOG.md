@@ -12,16 +12,21 @@ Contains breaking API changes; see README for the new shapes.
 * **DP is parsed by declared length, not by splitting on `*`.** Line text
   legitimately contains asterisks (masked PANs, rules of stars); splitting
   first fabricated one segment per asterisk and destroyed the real line.
-* **All framing and length arithmetic moved to bytes.** TLV LENGTH counts
-  bytes; Dart string indices are UTF-16 code units, so every accent in the
-  French receipt text shifted subsequent offsets.
+* **TLV and DP LENGTH count characters (runes).** Confirmed against the NAPS
+  v1.1 specification: LENGTH is a character count for the transmitted VALUE
+  across all TLV tags and DP sub-tags. Counting bytes caused readers to stop
+  short on non-ASCII characters, truncating French receipts at accented lines
+  (e.g., `N° Commerçant`, `Opération réussie`).
+* **Fields after the receipt DP terminator are captured.** The terminal can
+  place tags—such as response code `013` (CR) or timestamps (`014`, `015`)—after
+  the receipt. The parser now consumes trailing tags rather than halting at
+  `?`, ensuring approved payments with trailing CRs are correctly recognized.
+* **Partial frames are never delivered.** A NAPS frame carries no length
+  prefix or delimiter. Completion is decided by the message envelope, the DP
+  terminator, and detection of the next frame's tag `001` or settle window.
 * **Raw socket chunks are no longer UTF-8 decoded.** A multi-byte character
   split across a TCP segment threw and tore down the connection
   mid-transaction.
-* **Partial frames are never delivered.** A NAPS frame carries no length
-  prefix or delimiter, so "every buffered byte parsed" is not "the message is
-  complete". Completion is now decided by the message envelope plus the DP
-  terminator, with a short settle for undelimited responses.
 * Back-to-back frames in one buffer no longer merge.
 * Receipt line text is no longer trimmed; padding is how the terminal aligns
   a 24-column line.
@@ -32,6 +37,8 @@ Contains breaking API changes; see README for the new shapes.
   did not complete now returns the full payment context (NS, STAN, amount,
   masked PAN, expiry, merchant receipt) instead of a bare error. A non-000
   TM 102 is reported here too, rather than as a plain decline.
+* **Strict NS correlation restored.** Validates that the terminal echoes the
+  request sequence number (NS) per NAPS specification sections III.2.3.1–III.2.3.6.
 * **`NapsSequenceStore`** — NS is now supplied by an injectable, persistable
   store. Previously an SDK constructed per transaction reissued the same NS
   every time.
@@ -47,6 +54,8 @@ Contains breaking API changes; see README for the new shapes.
 * **`NapsFrameLog`** — connections emit the actual wire frame, as hex and as a
   TLV summary, with tags 007 (NCAR) and 016 (NPRT) masked before the callback
   can see them.
+* **`NapsFrameLog.bufferedAfter`** — reports unconsumed buffer bytes when a
+  frame is dispatched, distinguishing parser issues from network delays.
 * Synthetic SDK conditions no longer masquerade as terminal response codes;
   a protocol mismatch reports `sdkError` with an empty CR.
 
@@ -57,8 +66,10 @@ Contains breaking API changes; see README for the new shapes.
   of `bool`/`null`.
 * `NapsConnection` gains `transportDescription`; connections take `onFrame`.
 * `NapsReceipt.parseBytes` is the primary parser; `parse(String)` delegates.
+* `TlvElement` exposes `byteLength` alongside `length` (character count).
 * `NapsSdk` validates NCAI and exposes `NapsSdk.posIdIssue` for setup screens.
 * Serial baud rate is configurable.
+
 
 ## 1.0.0
 
