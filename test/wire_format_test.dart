@@ -20,11 +20,22 @@ Uint8List _tlv(String tag, String value) {
 Uint8List _concat(List<Uint8List> parts) =>
     Uint8List.fromList(parts.expand((p) => p).toList());
 
+/// A DP sub-tag, whose LENGTH is a CHARACTER count as the terminal emits it.
+///
+/// Confirmed against 20 production frames: `033023N° Commerçant : 2260292` is
+/// 23 characters and 25 UTF-8 bytes. Scalar tags stay on [_tlv] - they are all
+/// ASCII, where the two counts agree.
+Uint8List _dpTlv(String tag, String value) {
+  final bytes = utf8.encode(value);
+  final declared = value.runes.length.toString().padLeft(3, '0');
+  return Uint8List.fromList([...utf8.encode('$tag$declared'), ...bytes]);
+}
+
 Uint8List _dpLine(int n, String fmt, String align, String text) => _concat([
-  _tlv('030', n.toString().padLeft(2, '0')),
-  _tlv('031', fmt),
-  _tlv('032', align),
-  _tlv('033', text),
+  _dpTlv('030', n.toString().padLeft(2, '0')),
+  _dpTlv('031', fmt),
+  _dpTlv('032', align),
+  _dpTlv('033', text),
 ]);
 
 /// Builds a DP payload: lines separated by '*', the last closed by '?'.
@@ -40,8 +51,13 @@ Uint8List _dpPayload(List<String> lines) {
 }
 
 /// Wraps a DP payload in tag 010, saturating LENGTH at 999 as the terminal does.
+///
+/// LENGTH is a character count here as everywhere else, so an accented payload
+/// declares fewer than its byte length. Declaring bytes made the reader
+/// advance that many *characters* and overshoot the end of the frame.
 Uint8List _dpField(Uint8List payload) {
-  final declared = payload.length > 999 ? 999 : payload.length;
+  final chars = utf8.decode(payload, allowMalformed: true).runes.length;
+  final declared = chars > 999 ? 999 : chars;
   return _concat([
     Uint8List.fromList(
       utf8.encode('010${declared.toString().padLeft(3, '0')}'),
@@ -111,7 +127,9 @@ void main() {
       expect(scan.elements.length, 12);
 
       final dp = scan.elements.firstWhere((e) => e.tag == kTagDp);
-      expect(dp.length, payload.length);
+      // byteLength, not length: LENGTH counts characters, and this payload's
+      // French text makes the two differ by the number of accents in it.
+      expect(dp.byteLength, payload.length);
       expect(dp.length, greaterThan(kMaxDeclaredLength));
     });
 
@@ -120,6 +138,8 @@ void main() {
       // the production logs report "tag inconnu ... artefact".
       final naiveEnd = _scalars.length + 6 + kMaxDeclaredLength;
       expect(naiveEnd, lessThan(frame101.length));
+      // Both sides are byte counts: the frame is scalars + 6 + payload bytes,
+      // and a naive reader stops 999 bytes into the payload.
       expect(frame101.length - naiveEnd, payload.length - kMaxDeclaredLength);
     });
 
@@ -332,11 +352,32 @@ void main() {
       expect(request.toFrameBytes().length, 131);
     });
 
-    test('TLV LENGTH counts bytes, not UTF-16 code units', () {
+    test('TLV LENGTH counts characters, and the byte count differs', () {
+      // NAPS confirmed against the v1.1 specification: LENGTH is the length in
+      // characters of the transmitted VALUE, for the whole TLV structure.
       final element = TlvElement('033', 'Opération réussie');
-      expect(element.value.length, 17);
-      expect(element.length, 19);
-      expect(element.encode().startsWith('033019'), isTrue);
+      expect(element.length, 17, reason: 'characters');
+      expect(element.byteLength, 19, reason: 'UTF-8 bytes - é twice');
+      expect(element.encode().startsWith('033017'), isTrue);
+    });
+
+    test('a decoded value round-trips through its own declared length', () {
+      const text = 'N° Commerçant : 2260292';
+      final element = TlvElement('033', text);
+      expect(element.length, 23);
+      expect(element.byteLength, 25);
+      final encoded = utf8.encode(element.encode());
+      // Re-reading the frame must land on the same boundary it declared.
+      final scan = NapsTlv.scanFrame(
+        _concat([
+          _tlv('001', '101'),
+          _tlv('003', '0263920173'),
+          _tlv('004', '000005'),
+          Uint8List.fromList(encoded),
+        ]),
+      );
+      expect(scan.status, NapsScanStatus.complete);
+      expect(scan.elements.last.value, text);
     });
   });
 
@@ -542,6 +583,69 @@ void main() {
       expect(done!.end, f.length);
       expect(done.message.responseCode, '000');
       expect(done.message.elements.containsKey('015'), isTrue);
+    });
+  });
+
+  group('DP LENGTH counts characters, not bytes', () {
+    // Taken from production: 20 frames in the 2 September logs declare 23 for
+    //   033023N° Commerçant : 2260292
+    // which is 23 characters and 25 UTF-8 bytes. Read as bytes it stops two
+    // short, mid-value, and the receipt ends at the first accented line.
+    Uint8List accentedLine() =>
+        _dpLine(14, 'S', 'G', 'N° Commerçant : 2260292');
+
+    test('the fixture really does disagree byte-for-character', () {
+      const text = 'N° Commerçant : 2260292';
+      expect(text.runes.length, 23);
+      expect(utf8.encode(text).length, 25);
+    });
+
+    test('an accented line does not end the receipt', () {
+      final dp = _concat([
+        _dpLine(1, 'S', 'G', 'Naps'),
+        Uint8List.fromList(utf8.encode('*')),
+        accentedLine(),
+        Uint8List.fromList(utf8.encode('*')),
+        _dpLine(15, 'S', 'G', 'N° Terminal : 99909076'),
+        Uint8List.fromList(utf8.encode('?')),
+      ]);
+      final receipt = NapsReceipt.parseBytes(dp);
+      expect(receipt.lines.length, 3, reason: 'stopped at the accented line');
+      expect(receipt.lines[1].text, 'N° Commerçant : 2260292');
+      expect(receipt.isTruncated, isFalse);
+    });
+
+    test('the frame end is found past an accented line', () {
+      final frame = _concat([
+        _tlv('001', '101'),
+        _tlv('003', '0263920173'),
+        _tlv('004', '000005'),
+        _tlv('013', '000'),
+        _dpField(
+          _concat([accentedLine(), Uint8List.fromList(utf8.encode('?'))]),
+        ),
+      ]);
+      final scan = NapsTlv.scanFrame(frame);
+      expect(scan.status, NapsScanStatus.complete);
+      expect(scan.dpTerminated, isTrue);
+      expect(scan.end, frame.length);
+    });
+
+    test('fields after an accented receipt are still reached', () {
+      final frame = _concat([
+        _tlv('001', '101'),
+        _tlv('003', '0263920173'),
+        _tlv('004', '000005'),
+        _dpField(
+          _concat([accentedLine(), Uint8List.fromList(utf8.encode('?'))]),
+        ),
+        _tlv('013', '000'),
+        _tlv('008', '000269'),
+      ]);
+      final scan = NapsTlv.scanFrame(frame);
+      final msg = NapsMessage.fromScan(scan, frame);
+      expect(msg.responseCode, '000');
+      expect(msg.elements['008']?.value, '000269');
     });
   });
 }

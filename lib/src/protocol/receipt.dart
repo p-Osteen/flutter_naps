@@ -79,8 +79,19 @@ class NapsReceipt {
   /// Keys are matched case-insensitively and accent-insensitively against the
   /// start of the label, so both the French and English wordings resolve.
   static const Map<String, List<String>> _fieldAliases = {
-    'authorisationNumber': ['n autorisation', 'no autorisation', 'authorization', 'authorisation', 'auth'],
-    'merchantNumber': ['n commercant', 'no commercant', 'merchant id', 'merchant'],
+    'authorisationNumber': [
+      'n autorisation',
+      'no autorisation',
+      'authorization',
+      'authorisation',
+      'auth',
+    ],
+    'merchantNumber': [
+      'n commercant',
+      'no commercant',
+      'merchant id',
+      'merchant',
+    ],
     'terminalNumber': ['n terminal', 'no terminal', 'terminal id', 'terminal'],
     'transactionNumber': ['n transaction', 'no transaction', 'transaction'],
     'stan': ['n stan', 'stan'],
@@ -113,7 +124,9 @@ class NapsReceipt {
     for (final entry in extractFields().entries) {
       final key = _normaliseKey(entry.key);
       for (final alias in aliases) {
-        if (key == alias || key.startsWith('$alias ') || key.startsWith(alias)) {
+        if (key == alias ||
+            key.startsWith('$alias ') ||
+            key.startsWith(alias)) {
           final value = entry.value.trim();
           if (value.isNotEmpty) return value;
         }
@@ -170,9 +183,16 @@ class NapsReceipt {
         final tag = String.fromCharCodes(raw, p, p + 3);
         if (!kDpSubTags.contains(tag)) break;
         final len = _int3(raw, p + 3);
-        if (len == null || p + 6 + len > raw.length) break;
-        fields[tag] = Uint8List.fromList(raw.sublist(p + 6, p + 6 + len));
-        p += 6 + len;
+        if (len == null) break;
+        // LENGTH is a character count, not a byte count: the terminal declares
+        // 23 for "N° Commerçant : 2260292", which is 23 characters and 25
+        // UTF-8 bytes. Reading it as bytes stopped every receipt at the first
+        // accented line. Must stay in step with NapsTlv, which uses the same
+        // rule to find the end of the DP field.
+        final valueEnd = _advanceChars(raw, p + 6, len);
+        if (valueEnd < 0) break;
+        fields[tag] = Uint8List.fromList(raw.sublist(p + 6, valueEnd));
+        p = valueEnd;
         read++;
       }
 
@@ -229,6 +249,31 @@ class NapsReceipt {
 
   static String _text(Uint8List? bytes) =>
       bytes == null ? '' : utf8.decode(bytes, allowMalformed: true);
+
+  /// Byte offset of the character [count] characters after [from], or -1 when
+  /// those bytes have not all arrived. See the note in [parseBytes]: DP
+  /// LENGTH counts characters, and this receipt's French text is not ASCII.
+  static int _advanceChars(Uint8List bytes, int from, int count) {
+    var p = from;
+    var seen = 0;
+    while (seen < count) {
+      if (p >= bytes.length) return -1;
+      final b = bytes[p];
+      final width = b < 0x80
+          ? 1
+          : (b & 0xE0) == 0xC0
+          ? 2
+          : (b & 0xF0) == 0xE0
+          ? 3
+          : (b & 0xF8) == 0xF0
+          ? 4
+          : 1;
+      if (p + width > bytes.length) return -1;
+      p += width;
+      seen++;
+    }
+    return p;
+  }
 
   static int? _int3(Uint8List b, int i) {
     var n = 0;

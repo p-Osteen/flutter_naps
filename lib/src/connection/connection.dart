@@ -23,20 +23,34 @@ class NapsFrameLog {
   /// `tag(len)=value` breakdown with the same fields masked and DP summarised.
   final String tlv;
 
+  /// Bytes still in the read buffer once this frame was taken.
+  ///
+  /// [byteLength] is where the PARSER stopped, not how much arrived. When a
+  /// frame is reported truncated and this is greater than zero, the rest of
+  /// the response was already in hand and the fault is on our side of the
+  /// wire - which is precisely the distinction that took a 24.00 MAD
+  /// transaction and two rounds with NAPS to establish.
+  final int bufferedAfter;
+
   const NapsFrameLog({
     required this.direction,
     required this.byteLength,
     required this.hex,
     required this.tlv,
+    this.bufferedAfter = 0,
   });
 
-  factory NapsFrameLog.of(NapsFrameDirection direction, Uint8List frame) =>
-      NapsFrameLog(
-        direction: direction,
-        byteLength: frame.length,
-        hex: NapsLogRedactor.toHex(frame),
-        tlv: NapsLogRedactor.toTlvSummary(frame),
-      );
+  factory NapsFrameLog.of(
+    NapsFrameDirection direction,
+    Uint8List frame, {
+    int bufferedAfter = 0,
+  }) => NapsFrameLog(
+    direction: direction,
+    byteLength: frame.length,
+    hex: NapsLogRedactor.toHex(frame),
+    tlv: NapsLogRedactor.toTlvSummary(frame),
+    bufferedAfter: bufferedAfter,
+  );
 
   @override
   String toString() =>

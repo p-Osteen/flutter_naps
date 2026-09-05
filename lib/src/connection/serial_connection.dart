@@ -158,7 +158,13 @@ class NapsSerialConnection implements NapsConnection {
     _buffer.commit(peek.end);
     final raw = peek.message.rawFrame;
     if (raw != null) {
-      onFrame?.call(NapsFrameLog.of(NapsFrameDirection.inbound, raw));
+      onFrame?.call(
+        NapsFrameLog.of(
+          NapsFrameDirection.inbound,
+          raw,
+          bufferedAfter: _buffer.length,
+        ),
+      );
     }
     return peek.message;
   }
@@ -190,7 +196,13 @@ class NapsSerialConnection implements NapsConnection {
     _buffer.commit(peek.end);
     final raw = peek.message.rawFrame;
     if (raw != null) {
-      onFrame?.call(NapsFrameLog.of(NapsFrameDirection.inbound, raw));
+      onFrame?.call(
+        NapsFrameLog.of(
+          NapsFrameDirection.inbound,
+          raw,
+          bufferedAfter: _buffer.length,
+        ),
+      );
     }
     _completer = null;
     pending.complete(peek.message);

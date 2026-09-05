@@ -86,18 +86,20 @@ void main() {
       expect(receipt.isTruncated, isFalse);
     });
 
-    test('accented text keeps its byte alignment', () {
-      // 033 declares 27 BYTES; the string is 25 UTF-16 code units. Measuring
-      // in code units drifts by two and eats the terminator.
-      const text = 'Conservez-moi, je peux etre';
-      const accented = 'Opération réussie';
+    test('accented text is measured in characters, as the terminal counts', () {
+      // Spec III.2.1: LENGTH is the number of characters. 'Opération réussie'
+      // is 17 characters and 19 UTF-8 bytes, so a byte-driven reader stops two
+      // short, mid-character, and loses the rest of the receipt.
+      const plain = 'Conservez-moi, je peux etre';   // 27, ASCII
+      const accented = 'Opération réussie';          // 17 chars / 19 bytes
       final raw =
-          '03000201031001S032001G033027$text'
-          '*03000202031001S032001C033019$accented?';
+          '03000201031001S032001G033027$plain'
+          '*03000202031001S032001C033017$accented?';
       final receipt = NapsReceipt.parse(raw);
       expect(receipt.lines.length, 2);
-      expect(receipt.lines[0].text, text);
+      expect(receipt.lines[0].text, plain);
       expect(receipt.lines[1].text, accented);
+      expect(receipt.isTruncated, isFalse);
     });
 
     test('trailing spaces in line text are preserved', () {

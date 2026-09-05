@@ -109,8 +109,18 @@ class TlvElement {
   String get value =>
       _decoded ??= utf8.decode(valueBytes, allowMalformed: true);
 
-  /// LENGTH as the terminal counts it: bytes.
-  int get length => valueBytes.length;
+  /// LENGTH as the protocol defines it: a count of CHARACTERS.
+  ///
+  /// NAPS confirmed against the v1.1 specification that LENGTH is the length
+  /// in characters of the transmitted VALUE, for the whole TLV structure and
+  /// not only inside DP. Identical to [byteLength] for ASCII, which is every
+  /// field the kiosk currently sends - but declaring bytes would be wrong the
+  /// first time a non-ASCII value went out.
+  int get length => value.runes.length;
+
+  /// Size of the value on the wire, in bytes. Used for buffer arithmetic, not
+  /// for the LENGTH header.
+  int get byteLength => valueBytes.length;
 
   /// Serialises to `TAG(3) + LENGTH(3, zero-padded) + VALUE`.
   ///
@@ -123,7 +133,8 @@ class TlvElement {
   }
 
   @override
-  String toString() => 'TlvElement(tag: $tag, length: $length, value: $value)';
+  String toString() =>
+      'TlvElement(tag: $tag, length: $length, bytes: $byteLength, value: $value)';
 
   @override
   bool operator ==(Object other) =>
@@ -241,10 +252,11 @@ class NapsTlv {
         }
         if (scanned == _dpMalformed) {
           // Fall back to the declared length rather than losing the field.
-          valueEnd = valueStart + declared;
-          if (valueEnd > bytes.length) {
+          final fallbackEnd = _advanceChars(bytes, valueStart, declared);
+          if (fallbackEnd < 0) {
             return NapsFrameScan(NapsScanStatus.needMoreData, elements, -1);
           }
+          valueEnd = fallbackEnd;
         } else {
           valueEnd = scanned;
           if (bytes[valueEnd - 1] == kDpTerminator) {
@@ -254,10 +266,15 @@ class NapsTlv {
           }
         }
       } else {
-        valueEnd = valueStart + declared;
-        if (valueEnd > bytes.length) {
+        // LENGTH is a character count for every tag, not only inside DP -
+        // confirmed by NAPS against the v1.1 specification. Identical to a
+        // byte count for the ASCII scalars, but tag 016 (cardholder name)
+        // carries free text and would drift exactly as the receipt did.
+        final scalarEnd = _advanceChars(bytes, valueStart, declared);
+        if (scalarEnd < 0) {
           return NapsFrameScan(NapsScanStatus.needMoreData, elements, -1);
         }
+        valueEnd = scalarEnd;
         if (tag == kTagDp &&
             declared > 0 &&
             bytes[valueEnd - 1] == kDpTerminator) {
@@ -292,6 +309,44 @@ class NapsTlv {
   ///
   /// Returns [_dpNeedMore] when the buffer runs out mid-receipt, or
   /// [_dpMalformed] when the bytes at [start] are not a DP line.
+  /// Advances [count] *characters* from [from], returning the byte offset.
+  ///
+  /// DP sub-tag LENGTH is a character count, not a byte count. Confirmed
+  /// against 20 production frames: the receipt line
+  ///
+  ///   033023N° Commerçant : 2260292
+  ///
+  /// declares 23, and "N° Commerçant : 2260292" is 23 characters but 25 UTF-8
+  /// bytes - "°" and "ç" each take two. Every ASCII line agrees either way,
+  /// which is why this stayed hidden. Reading 23 *bytes* lands two bytes short,
+  /// mid-value; the next sub-tag read then fails and the receipt silently ends
+  /// at the first accented line - which is every merchant receipt this
+  /// terminal prints.
+  ///
+  /// Returns -1 when the bytes for [count] characters have not all arrived.
+  static int _advanceChars(Uint8List bytes, int from, int count) {
+    var p = from;
+    var seen = 0;
+    while (seen < count) {
+      if (p >= bytes.length) return -1;
+      final b = bytes[p];
+      // UTF-8 lead byte tells us the character's width.
+      final width = b < 0x80
+          ? 1
+          : (b & 0xE0) == 0xC0
+          ? 2
+          : (b & 0xF0) == 0xE0
+          ? 3
+          : (b & 0xF8) == 0xF0
+          ? 4
+          : 1; // a stray continuation byte: count it alone rather than hang
+      if (p + width > bytes.length) return -1;
+      p += width;
+      seen++;
+    }
+    return p;
+  }
+
   static int _scanDpEnd(
     Uint8List bytes,
     int start, {
@@ -319,8 +374,10 @@ class NapsTlv {
         if (!kDpSubTags.contains(tag)) break;
         final len = _int3(bytes, p + 3);
         if (len == null) return read == 0 ? _dpMalformed : _dpNeedMore;
-        if (p + 6 + len > bytes.length) return _dpNeedMore;
-        p += 6 + len;
+        // LENGTH counts characters here, not bytes. See [_advanceChars].
+        final valueEnd = _advanceChars(bytes, p + 6, len);
+        if (valueEnd < 0) return _dpNeedMore;
+        p = valueEnd;
         read++;
       }
 
