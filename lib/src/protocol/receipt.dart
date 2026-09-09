@@ -4,16 +4,42 @@ import 'dart:typed_data';
 
 import 'tlv.dart';
 
-enum NapsPrintFormat { simple, bold }
+/// Text print weight and formatting for a receipt line.
+enum NapsPrintFormat {
+  /// Normal standard weight text.
+  simple,
 
-enum NapsAlignment { left, center, right }
+  /// Emphasized bold text.
+  bold,
+}
 
+/// Text alignment for a receipt line.
+enum NapsAlignment {
+  /// Left-aligned text.
+  left,
+
+  /// Centered text.
+  center,
+
+  /// Right-aligned text.
+  right,
+}
+
+/// A parsed single line of a NAPS payment receipt.
 class NapsReceiptLine {
+  /// The 1-based sequential line number within the receipt.
   final int lineNumber;
+
+  /// The formatting style (simple or bold) for this line.
   final NapsPrintFormat format;
+
+  /// The horizontal text alignment for this line.
   final NapsAlignment alignment;
+
+  /// The textual content of the receipt line.
   final String text;
 
+  /// Creates a receipt line with the specified [lineNumber], [format], [alignment], and [text].
   NapsReceiptLine({
     required this.lineNumber,
     required this.format,
@@ -42,7 +68,9 @@ class NapsReceiptLine {
       text.hashCode;
 }
 
+/// A parsed NAPS transaction receipt containing sequential receipt lines.
 class NapsReceipt {
+  /// The ordered lines of this receipt.
   final List<NapsReceiptLine> lines;
 
   /// True when the DP payload ended without its `?` terminator, i.e. the
@@ -50,6 +78,7 @@ class NapsReceipt {
   /// legally significant copies should surface this rather than ignore it.
   final bool isTruncated;
 
+  /// Creates a [NapsReceipt] with the given [lines] and truncation flag.
   NapsReceipt(this.lines, {this.isTruncated = false});
 
   /// Extracts named fields from receipt text lines.

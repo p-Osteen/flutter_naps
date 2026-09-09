@@ -1,11 +1,30 @@
-enum NapsResponseStatus { approved, declined, error }
+/// High-level status category for a NAPS terminal response code.
+enum NapsResponseStatus {
+  /// The transaction was approved.
+  approved,
 
+  /// The transaction was explicitly declined.
+  declined,
+
+  /// An error occurred during transaction processing.
+  error,
+}
+
+/// Metadata and human-readable descriptions associated with a NAPS response code.
 class NapsResponseMetadata {
+  /// The 3-character response code from the terminal (e.g. '000').
   final String code;
+
+  /// The categorized status of this response.
   final NapsResponseStatus status;
+
+  /// Technical description of the response condition.
   final String description;
+
+  /// User-friendly message suitable for customer presentation.
   final String userMessage;
 
+  /// Creates response metadata with the provided [code], [status], [description], and [userMessage].
   const NapsResponseMetadata({
     required this.code,
     required this.status,
@@ -13,9 +32,11 @@ class NapsResponseMetadata {
     required this.userMessage,
   });
 
+  /// Whether this response code represents a successful transaction.
   bool get isSuccess => status == NapsResponseStatus.approved;
 }
 
+/// Lookup and utility methods for NAPS response codes.
 class NapsResponseCodes {
   /// Response codes defined in the NAPS Integration Guide §7.
   ///

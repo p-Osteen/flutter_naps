@@ -7,11 +7,11 @@ const int kDpSeparator = 0x2A;
 /// Byte value of the DP end-of-receipt marker `?` (spec §III.2.4).
 const int kDpTerminator = 0x3F;
 
-/// Tag carrying printable receipt data (DP).
 /// Message type. Occurs exactly once per frame, which makes it the only
 /// reliable "a new frame starts here" marker in a format with no delimiter.
 const String kTagMessageType = '001';
 
+/// Tag carrying printable receipt data (DP).
 const String kTagDp = '010';
 
 /// Sub-tags that make up one printable receipt line: DP1..DP4.
@@ -46,7 +46,10 @@ enum NapsScanStatus {
 
 /// The result of [NapsTlv.scanFrame].
 class NapsFrameScan {
+  /// The scan status indicating whether a complete frame, partial data, or malformed bytes were found.
   final NapsScanStatus status;
+
+  /// Parsed TLV elements for the scanned frame.
   final List<TlvElement> elements;
 
   /// Exclusive end offset of the frame within the scanned buffer.
@@ -76,6 +79,7 @@ class NapsFrameScan {
   /// the frame was still growing.
   final bool nextFrameStarts;
 
+  /// Creates a frame scan result with status, parsed elements, end offset, and receipt flags.
   const NapsFrameScan(
     this.status,
     this.elements,
@@ -94,14 +98,19 @@ class NapsFrameScan {
 /// accented characters that appear throughout the French receipt text, because
 /// String indices are UTF-16 code units, not bytes.
 class TlvElement {
+  /// The 3-character tag identifying the field.
   final String tag;
+
+  /// The raw value bytes on the wire.
   final Uint8List valueBytes;
   String? _decoded;
 
+  /// Creates a [TlvElement] from a string value, UTF-8 encoding it into [valueBytes].
   TlvElement(this.tag, String value)
     : valueBytes = Uint8List.fromList(utf8.encode(value)),
       _decoded = value;
 
+  /// Creates a [TlvElement] directly from raw value bytes.
   TlvElement.fromBytes(this.tag, this.valueBytes);
 
   /// The value decoded as UTF-8. Malformed sequences are replaced rather than
@@ -145,6 +154,7 @@ class TlvElement {
   int get hashCode => tag.hashCode ^ value.hashCode;
 }
 
+/// Utility for encoding, decoding, and scanning NAPS TLV frames.
 class NapsTlv {
   // Sentinels for the DP structural scan.
   static const int _dpNeedMore = -1;

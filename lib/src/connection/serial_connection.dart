@@ -9,12 +9,22 @@ import 'frame_buffer.dart';
 
 /// Information about an available serial/USB port on the host system.
 class NapsSerialPortInfo {
+  /// The operating system port identifier (e.g. 'COM3' or '/dev/ttyUSB0').
   final String name;
+
+  /// Human-readable port description if available.
   final String? description;
+
+  /// Device manufacturer name if available.
   final String? manufacturer;
+
+  /// USB vendor ID (VID) if available.
   final int? vendorId;
+
+  /// USB product ID (PID) if available.
   final int? productId;
 
+  /// Creates serial port information with the given [name] and optional device attributes.
   const NapsSerialPortInfo({
     required this.name,
     this.description,
@@ -34,8 +44,13 @@ class NapsSerialPortInfo {
 
 /// Concrete implementation of [NapsConnection] over a USB-C / COM port.
 class NapsSerialConnection implements NapsConnection {
+  /// The operating system port name (e.g. 'COM3' or '/dev/ttyUSB0').
   final String portName;
+
+  /// Serial communication speed in baud (defaults to 9600).
   final int baudRate;
+
+  /// Default timeout applied to serial read and write operations.
   final Duration defaultTimeout;
 
   /// Returns a list of available serial/USB port names (e.g. `['COM1', 'COM3']` or `['/dev/ttyUSB0']`).
@@ -84,6 +99,7 @@ class NapsSerialConnection implements NapsConnection {
   /// has to be confirmed with NAPS per point of sale.
   static const int defaultBaudRate = 9600;
 
+  /// Creates a serial connection targeting [portName] at [baudRate] with [defaultTimeout] and optional [onFrame] logger.
   NapsSerialConnection({
     required this.portName,
     this.baudRate = defaultBaudRate,

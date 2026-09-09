@@ -1,6 +1,14 @@
 # NAPS Flutter SDK
 
-This Flutter package connects your application to a SUNMI P2 payment terminal. It uses the M2M TLV protocol over a TCP/IP or Serial connection.
+A Flutter SDK for interfacing directly with physical **NAPS SUNMI P2 Electronic Payment Terminals (EPT / POS)** using the M2M TLV protocol over local network (TCP/IP) or USB/Serial connections.
+
+> [!IMPORTANT]
+> **Hardware Terminal Integration (Not an In-App Payment Gateway)**
+>
+> This package is engineered specifically for **physical point-of-sale (POS) hardware communication**. It bridges your Flutter application (e.g., self-service kiosks, cash registers, retail POS systems) directly to an external payment terminal device (such as the SUNMI P2) connected via local Wi-Fi/Ethernet or direct USB-C cable.
+>
+> * **What this package does**: Drives on-premise payment terminals to initiate in-person card transactions (chip & PIN, contactless/NFC, magnetic stripe), handle two-phase payment confirmations, perform voids/cancellations, and process terminal receipts.
+> * **What this package is NOT**: This is **not** an in-app payment gateway SDK (such as Stripe or Razorpay). It does not process online e-commerce checkouts, digital wallet tokens, or in-app card payment forms.
 
 ## Features
 

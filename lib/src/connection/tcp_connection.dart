@@ -6,9 +6,15 @@ import '../protocol/message.dart';
 import 'connection.dart';
 import 'frame_buffer.dart';
 
+/// TCP socket connection to a NAPS payment terminal over Wi-Fi or Ethernet.
 class NapsTcpConnection implements NapsConnection {
+  /// The IP address or hostname of the terminal.
   final String host;
+
+  /// The TCP port used by the terminal (typically 4444).
   final int port;
+
+  /// Default timeout applied to network and transaction operations.
   final Duration defaultTimeout;
 
   /// Receives every frame in and out, already redacted. See [NapsFrameLog].
@@ -20,6 +26,7 @@ class NapsTcpConnection implements NapsConnection {
   StreamSubscription<Uint8List>? _subscription;
   Timer? _settleTimer;
 
+  /// Creates a TCP connection configured with target [host], [port], [defaultTimeout], and optional [onFrame] logger.
   NapsTcpConnection({
     required this.host,
     this.port = 4444,

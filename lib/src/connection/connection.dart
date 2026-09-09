@@ -4,7 +4,13 @@ import '../protocol/message.dart';
 import '../protocol/redaction.dart';
 
 /// Which way a logged frame was travelling.
-enum NapsFrameDirection { outbound, inbound }
+enum NapsFrameDirection {
+  /// Outbound frame sent from host to terminal.
+  outbound,
+
+  /// Inbound frame received from terminal to host.
+  inbound,
+}
 
 /// One frame, rendered safe for logging.
 ///
@@ -12,6 +18,7 @@ enum NapsFrameDirection { outbound, inbound }
 /// object cannot leak cardholder data even by accident, which is the only way
 /// to make guide §10.2 hold for a pipeline that ships logs off the device.
 class NapsFrameLog {
+  /// The direction the frame was traveling (outbound or inbound).
   final NapsFrameDirection direction;
 
   /// Length of the frame as it appeared on the wire, in bytes.
@@ -32,6 +39,7 @@ class NapsFrameLog {
   /// transaction and two rounds with NAPS to establish.
   final int bufferedAfter;
 
+  /// Creates a safe frame log entry.
   const NapsFrameLog({
     required this.direction,
     required this.byteLength,
@@ -40,6 +48,7 @@ class NapsFrameLog {
     this.bufferedAfter = 0,
   });
 
+  /// Creates a safe [NapsFrameLog] by redacting sensitive data from the raw [frame] bytes.
   factory NapsFrameLog.of(
     NapsFrameDirection direction,
     Uint8List frame, {
@@ -57,8 +66,10 @@ class NapsFrameLog {
       '${direction == NapsFrameDirection.outbound ? '>>' : '<<'} ${byteLength}B $tlv';
 }
 
+/// Callback invoked when a redacted frame log entry is emitted.
 typedef NapsFrameLogger = void Function(NapsFrameLog entry);
 
+/// Interface representing a communication channel to the NAPS terminal.
 abstract class NapsConnection {
   /// Establish connection to the EPT terminal.
   Future<bool> connect();

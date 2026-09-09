@@ -6,6 +6,7 @@ import '../protocol/tlv.dart';
 
 /// A frame the buffer believes is complete, not yet consumed.
 class NapsFramePeek {
+  /// The decoded message instance.
   final NapsMessage message;
 
   /// Exclusive end offset of the frame within the buffer.
@@ -18,6 +19,7 @@ class NapsFramePeek {
   /// caller should let the stream settle briefly before acting on it.
   final bool delimited;
 
+  /// Creates a frame peek result with decoded message, end offset, and delimiter flag.
   const NapsFramePeek(this.message, this.end, this.delimited);
 }
 
@@ -52,14 +54,19 @@ class NapsFrameBuffer {
     '113',
   };
 
+  /// The current number of bytes held in the buffer.
   int get length => _bytes.length;
 
+  /// Whether the buffer currently contains no bytes.
   bool get isEmpty => _bytes.isEmpty;
 
+  /// Returns a copy of the current buffered bytes.
   Uint8List snapshot() => Uint8List.fromList(_bytes);
 
+  /// Clears all buffered bytes.
   void clear() => _bytes = Uint8List(0);
 
+  /// Appends incoming raw byte chunks to the buffer.
   void add(List<int> chunk) {
     if (chunk.isEmpty) return;
     final merged = Uint8List(_bytes.length + chunk.length)

@@ -21,6 +21,8 @@ class NapsSequence {
   /// NS is 6 characters, so the counter runs 1..999999 and wraps.
   static const int max = 999999;
 
+  /// Advances [value] to the next sequence number in the 1..999999 range,
+  /// wrapping to 1 if the maximum is exceeded.
   static int advance(int value) {
     final next = (value + 1) % (max + 1);
     return next == 0 ? 1 : next;
@@ -35,7 +37,8 @@ class NapsSequence {
 class InMemoryNapsSequenceStore implements NapsSequenceStore {
   int _value;
 
-  InMemoryNapsSequenceStore([this._value = 0]);
+  /// Creates an in-memory sequence store, optionally starting from [initialValue].
+  InMemoryNapsSequenceStore([int initialValue = 0]) : _value = initialValue;
 
   @override
   Future<int> current() async => _value;
@@ -54,11 +57,15 @@ class InMemoryNapsSequenceStore implements NapsSequenceStore {
 /// taking a dependency on any of them. The write is awaited *before* the
 /// number is handed out, so a crash mid-transaction cannot reissue it.
 class CallbackNapsSequenceStore implements NapsSequenceStore {
+  /// Callback function to asynchronously read the persisted sequence number.
   final Future<int?> Function() read;
+
+  /// Callback function to asynchronously persist the updated sequence number.
   final Future<void> Function(int value) write;
 
   int? _cached;
 
+  /// Creates a callback-backed sequence store with [read] and [write] handlers.
   CallbackNapsSequenceStore({required this.read, required this.write});
 
   @override

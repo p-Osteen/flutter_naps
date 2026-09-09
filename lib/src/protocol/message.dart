@@ -3,7 +3,9 @@ import 'dart:typed_data';
 
 import 'tlv.dart';
 
+/// Represents a parsed NAPS TLV message frame.
 class NapsMessage {
+  /// Map of tag strings to their corresponding [TlvElement] instances.
   final Map<String, TlvElement> elements;
 
   /// True when the DP field was closed by the end of the buffer rather than by
@@ -15,6 +17,7 @@ class NapsMessage {
   /// re-encoding of what was understood.
   final Uint8List? rawFrame;
 
+  /// Creates a [NapsMessage] with the given [elements], optional [dpTruncated] flag, and optional [rawFrame].
   NapsMessage(this.elements, {this.dpTruncated = false, this.rawFrame});
 
   /// Creates a [NapsMessage] from a list of TLV elements.
@@ -103,7 +106,7 @@ class NapsMessage {
     return val != null ? int.tryParse(val) : null;
   }
 
-  /// NCAI (Tag 003) - POS identifier (7 chars: POS number [2] + cashier station number [5])
+  /// NCAI (Tag 003) - POS identifier (7 chars: POS number (2 chars) + cashier station number (5 chars))
   String get posId => elements['003']?.value ?? '';
 
   /// NS (Tag 004) - Sequence number (6 chars, e.g. "159159")

@@ -1,3 +1,11 @@
+## 2.1.1
+
+### Documentation & Public API Coverage
+* **100% Public Member Documentation**: Added comprehensive dartdoc comments (`///`) across all public symbols, constructors, models, enums, protocol encoders, and connection interfaces (achieving 100% Pana documentation score).
+* **Hardware Integration Notice**: Clarified and emphasized in `README.md` that the package is designed exclusively for on-premise hardware-level integration with physical POS payment terminals (SUNMI P2) over local Wi-Fi or USB-C serial, rather than an in-app software payment gateway (such as Stripe or Razorpay).
+* **Documentation References**: Cleaned up unescaped doc bracket references in `NapsMessage.posId` to ensure clean documentation compilation with zero warnings.
+* **Linter Quality Assurance**: Added `public_member_api_docs` to `analysis_options.yaml` to enforce documentation standards for future contributions.
+
 ## 2.1.0
 
 ### Hardware Discovery

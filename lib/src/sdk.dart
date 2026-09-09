@@ -36,44 +36,101 @@ enum NapsResultSource {
 /// Callers previously had to string-match on the exception text to tell a
 /// timeout from a socket error.
 enum NapsFailureReason {
+  /// Operation completed successfully or encountered no error.
   none,
+
+  /// The operation timed out waiting for a terminal response.
   timeout,
+
+  /// Communication with the terminal was lost or interrupted.
   connectionLost,
+
+  /// An unexpected, invalid, or malformed message frame was received.
   protocolMismatch,
+
+  /// The operation was explicitly cancelled by the user or host application.
   cancelledByUser,
+
+  /// The terminal explicitly declined or rejected the transaction.
   terminalDeclined,
+
+  /// The confirmation handshake (TM 002 / TM 102) failed.
   confirmationFailed,
+
+  /// The caller-provided callback (such as onApproved) threw an exception.
   callbackFailed,
+
+  /// An unspecified or unknown failure occurred.
   unknown,
 }
 
 /// Result of a NAPS transaction attempt (payment or confirmation).
 class NapsTransactionResult {
+  /// Whether the overall transaction succeeded.
   final bool isSuccess;
+
+  /// The origin or categorization of the result.
   final NapsResultSource source;
+
+  /// The terminal response code (CR), or an SDK-level error code.
   final String responseCode;
+
+  /// Technical description or summary of the outcome.
   final String description;
+
+  /// User-friendly message suitable for customer UI display.
   final String userMessage;
+
+  /// Categorized reason when the transaction fails.
   final NapsFailureReason failureReason;
 
   /// NS used for this transaction. Required to correlate a confirmation,
   /// a duplicate lookup or a manual reconciliation back to this payment.
   final int? sequenceNumber;
 
+  /// System Trace Audit Number (STAN / Tag 008) assigned by the terminal.
   final String? stan;
+
+  /// Masked card PAN returned by the terminal (Tag 007).
   final String? cardNumber;
+
+  /// Cardholder name if returned by the terminal (Tag 016).
   final String? cardholderName;
-  final String? authorizationNumber; // Tag 009 — NA
-  final String? cardExpirationDate; // Tag 017 — DAEX
-  final String? cardEntryMode; // Tag 040 — EM
-  final String? paymentType; // Tag 021 — TYPA
-  final int? amountInCents; // Tag 002 — MT
-  final String? currencyCode; // Tag 012 — DE
-  final String? transactionDate; // Tag 014 — DA (from TM=101)
-  final String? transactionTime; // Tag 015 — HE (from TM=101)
+
+  /// Authorization code granted by the payment network (Tag 009 — NA).
+  final String? authorizationNumber;
+
+  /// Card expiration date (Tag 017 — DAEX).
+  final String? cardExpirationDate;
+
+  /// Method used to read the card (Tag 040 — EM, e.g. chip, contactless, swipe).
+  final String? cardEntryMode;
+
+  /// Type of payment performed (Tag 021 — TYPA).
+  final String? paymentType;
+
+  /// Transaction amount in minor currency units (Tag 002 — MT).
+  final int? amountInCents;
+
+  /// ISO numeric currency code (Tag 012 — DE, e.g. 504 for MAD).
+  final String? currencyCode;
+
+  /// Transaction date in DDMMYY format (Tag 014 — DA from TM=101).
+  final String? transactionDate;
+
+  /// Transaction time in HHMMSS format (Tag 015 — HE from TM=101).
+  final String? transactionTime;
+
+  /// Parsed merchant copy of the receipt, if available.
   final NapsReceipt? merchantReceipt;
+
+  /// Parsed customer copy of the receipt, if available.
   final NapsReceipt? customerReceipt;
+
+  /// Raw parsed response message for the payment request (TM 101).
   final NapsMessage? paymentResponse;
+
+  /// Raw parsed response message for the confirmation request (TM 102).
   final NapsMessage? confirmationResponse;
 
   /// CR returned by the confirmation leg, when one was received.
@@ -90,6 +147,7 @@ class NapsTransactionResult {
   /// rethrown so a printer fault cannot take down a completed payment.
   final Object? callbackError;
 
+  /// Creates a transaction result with the given outcomes and metadata.
   NapsTransactionResult({
     required this.isSuccess,
     required this.source,
@@ -163,15 +221,31 @@ class NapsTransactionResult {
 /// socket died" — a distinction that decides whether a timed-out payment can
 /// be treated as recovered.
 class NapsOperationResult {
+  /// Whether the operation completed successfully.
   final bool isSuccess;
+
+  /// The origin or category of the operation result.
   final NapsResultSource source;
+
+  /// The terminal response code (CR), or an SDK error code.
   final String responseCode;
+
+  /// Technical description of the result.
   final String description;
+
+  /// Customer-facing explanation of the result.
   final String userMessage;
+
+  /// Categorized reason if the operation failed.
   final NapsFailureReason failureReason;
+
+  /// Parsed receipt if returned by the operation.
   final NapsReceipt? receipt;
+
+  /// Raw parsed response message from the terminal.
   final NapsMessage? response;
 
+  /// Creates an operation result with the provided outcomes and payloads.
   const NapsOperationResult({
     required this.isSuccess,
     required this.source,
@@ -183,6 +257,7 @@ class NapsOperationResult {
     this.response,
   });
 
+  /// Factory for constructing a failed [NapsOperationResult] with a [reason] and [description].
   factory NapsOperationResult.failure(
     NapsFailureReason reason,
     String description, {
@@ -197,6 +272,7 @@ class NapsOperationResult {
     failureReason: reason,
   );
 
+  /// System Trace Audit Number (STAN) extracted from the terminal response.
   String? get stan => response?.stan;
 
   @override
@@ -208,24 +284,52 @@ class NapsOperationResult {
 /// Intermediate information retrieved from the terminal before a cancellation
 /// is confirmed.
 class NapsCancellationInfo {
+  /// Whether the transaction to cancel was found on the terminal.
   final bool isFound;
+
+  /// The result source category.
   final NapsResultSource source;
+
+  /// The terminal response code returned by the lookup query.
   final String responseCode;
+
+  /// User-facing description of the lookup result.
   final String userMessage;
+
+  /// Categorized failure reason if the lookup failed.
   final NapsFailureReason failureReason;
-  final int sequenceNumber; // Reused verbatim in TM 004
+
+  /// The sequence number (NS) of the original transaction, reused verbatim in TM 004.
+  final int sequenceNumber;
+
+  /// The System Trace Audit Number (STAN) of the original transaction.
   final String stan;
+
+  /// Transaction amount in minor currency units.
   final int amountInCents;
+
+  /// ISO numeric currency code (e.g. 504 for MAD).
   final String currencyCode;
+
+  /// Transaction date in DDMMYY format.
   final String transactionDate;
+
+  /// Transaction time in HHMMSS format.
   final String transactionTime;
+
+  /// Card number (PAN) returned by the terminal.
   final String cardNumber;
+
+  /// Card expiration date in MMYY format.
   final String expirationDate;
+
+  /// Raw response message from the terminal.
   final NapsMessage? originalResponse;
 
   /// [cardNumber] masked, for anything outside the protocol path.
   String? get maskedCardNumber => NapsPan.mask(cardNumber);
 
+  /// Creates a cancellation info container with transaction details retrieved from the terminal.
   NapsCancellationInfo({
     required this.isFound,
     required this.source,
@@ -246,14 +350,28 @@ class NapsCancellationInfo {
 
 /// Final result of a cancellation.
 class NapsCancellationResult {
+  /// Whether the cancellation transaction succeeded.
   final bool isSuccess;
+
+  /// The result source category.
   final NapsResultSource source;
+
+  /// Terminal response code (CR) returned by the cancellation confirmation.
   final String responseCode;
+
+  /// Customer-facing description of the outcome.
   final String userMessage;
+
+  /// Categorized failure reason if the cancellation failed.
   final NapsFailureReason failureReason;
+
+  /// Parsed cancellation receipt if provided by the terminal.
   final NapsReceipt? cancellationReceipt;
+
+  /// Raw parsed confirmation response message (TM 104).
   final NapsMessage? confirmationResponse;
 
+  /// Creates a cancellation result container.
   NapsCancellationResult({
     required this.isSuccess,
     required this.source,
@@ -351,7 +469,10 @@ class _ApprovedPayment {
 
 /// Interacts with a NAPS SUNMI P2 terminal over the M2M TLV protocol.
 class NapsSdk {
+  /// The active communication channel to the payment terminal.
   final NapsConnection connection;
+
+  /// Identifier for the point of sale (NCAI / Tag 003).
   final String posId;
 
   /// Where NS comes from. Defaults to a non-persistent counter, which is fine
@@ -381,6 +502,7 @@ class NapsSdk {
   /// Timeout for messages that require a card read (spec §III.2.5).
   static const Duration cardReadTimeout = Duration(minutes: 2);
 
+  /// Creates a [NapsSdk] instance configured with [connection], [posId], and optional stores and timeouts.
   NapsSdk({
     required this.connection,
     required this.posId,
