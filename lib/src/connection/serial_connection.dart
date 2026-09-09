@@ -7,11 +7,67 @@ import '../protocol/message.dart';
 import 'connection.dart';
 import 'frame_buffer.dart';
 
+/// Information about an available serial/USB port on the host system.
+class NapsSerialPortInfo {
+  final String name;
+  final String? description;
+  final String? manufacturer;
+  final int? vendorId;
+  final int? productId;
+
+  const NapsSerialPortInfo({
+    required this.name,
+    this.description,
+    this.manufacturer,
+    this.vendorId,
+    this.productId,
+  });
+
+  @override
+  String toString() {
+    if (description != null && description!.isNotEmpty) {
+      return '$name ($description)';
+    }
+    return name;
+  }
+}
+
 /// Concrete implementation of [NapsConnection] over a USB-C / COM port.
 class NapsSerialConnection implements NapsConnection {
   final String portName;
   final int baudRate;
   final Duration defaultTimeout;
+
+  /// Returns a list of available serial/USB port names (e.g. `['COM1', 'COM3']` or `['/dev/ttyUSB0']`).
+  static List<String> get availablePorts {
+    try {
+      return SerialPort.availablePorts;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Returns detailed information about all available serial/USB ports on the host system.
+  static List<NapsSerialPortInfo> get availableDevices {
+    try {
+      return SerialPort.availablePorts.map((name) {
+        try {
+          final port = SerialPort(name);
+          return NapsSerialPortInfo(
+            name: name,
+            description: port.description,
+            manufacturer: port.manufacturer,
+            vendorId: port.vendorId,
+            productId: port.productId,
+          );
+        } catch (_) {
+          return NapsSerialPortInfo(name: name);
+        }
+      }).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// Receives every frame in and out, already redacted. See [NapsFrameLog].
   final NapsFrameLogger? onFrame;

@@ -1,3 +1,18 @@
+## 2.1.0
+
+### Hardware Discovery
+* **`NapsSerialConnection.availablePorts`**: Added static getter returning all available system serial and USB COM port names (e.g., `COM1`, `COM3`, `/dev/ttyUSB0`).
+* **`NapsSerialConnection.availableDevices`**: Added static getter querying connected serial devices with rich hardware attributes (`name`, `description`, `manufacturer`, `vendorId`, `productId`).
+* **`NapsSerialPortInfo`**: Introduced data class representing an enumerated serial/USB port on the host system.
+
+### Example Application & Workbench
+* **Modular Architecture**: Refactored monolithic example application into decoupled components (`pages/`, `widgets/`, `dialogs/`, `models/`, `constants/`).
+* **Tab-Based Navigation**: Added a dark fintech Material 3 bottom navigation bar with 5 isolated tabs (Payment Desk, Receipt Studio, Admin Services, Wire Telemetry, Link Config).
+* **USB Auto-Discovery Dropdown**: Link configuration dynamically detects and lists plugged-in USB terminals with rescan and manual entry options.
+* **Locked Protocol Configuration**: Enforced fixed `4444` TCP Port and `0030007` POS Identifier (Tag 003 NCAI) as read-only fields with lock indicators.
+* **Responsive Layout**: Resolved mobile AppBar overflow by implementing adaptive title text and compact action tooltips.
+* **Comprehensive Documentation**: Added a full-featured `README.md` covering architecture, protocol reference, response codes, and setup workflows.
+
 ## 2.0.0
 
 Conformance pass against the NAPS PAY SUNMI P2 M2M TLV v1.1 specification.
