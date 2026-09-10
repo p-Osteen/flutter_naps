@@ -71,6 +71,9 @@ typedef NapsFrameLogger = void Function(NapsFrameLog entry);
 
 /// Interface representing a communication channel to the NAPS terminal.
 abstract class NapsConnection {
+  /// Abstract const constructor to allow subclassing.
+  const NapsConnection();
+
   /// Establish connection to the EPT terminal.
   Future<bool> connect();
 

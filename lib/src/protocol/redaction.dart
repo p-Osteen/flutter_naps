@@ -17,6 +17,9 @@ const Set<String> kCardholderTags = {
 /// in the protocol guarantees that, and a log pipeline is the wrong place to
 /// discover otherwise.
 class NapsLogRedactor {
+  /// Private constructor to prevent instantiation of this utility class.
+  NapsLogRedactor._();
+
   /// Returns [frame] with the value of every [kCardholderTags] field replaced
   /// by `X` of the same length, so offsets and lengths stay diagnosable.
   static Uint8List redact(Uint8List frame) {
@@ -89,6 +92,7 @@ class NapsLogRedactor {
 /// The chosen format matches what the terminal prints on its own receipt
 /// (`455256******9866`), so a masked value here lines up with the paper copy.
 class NapsPan {
+  /// Private constructor to prevent instantiation of this utility class.
   NapsPan._();
 
   /// First six and last four digits retained, the middle replaced.

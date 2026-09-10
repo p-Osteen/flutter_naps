@@ -38,6 +38,9 @@ class NapsResponseMetadata {
 
 /// Lookup and utility methods for NAPS response codes.
 class NapsResponseCodes {
+  /// Private constructor to prevent instantiation of this utility class.
+  NapsResponseCodes._();
+
   /// Response codes defined in the NAPS Integration Guide §7.
   ///
   /// Success codes: 000, 001, 003, 007

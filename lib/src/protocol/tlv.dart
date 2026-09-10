@@ -156,6 +156,9 @@ class TlvElement {
 
 /// Utility for encoding, decoding, and scanning NAPS TLV frames.
 class NapsTlv {
+  /// Private constructor to prevent instantiation of this utility class.
+  NapsTlv._();
+
   // Sentinels for the DP structural scan.
   static const int _dpNeedMore = -1;
   static const int _dpMalformed = -2;

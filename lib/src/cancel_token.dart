@@ -8,6 +8,9 @@ import 'dart:async';
 /// receive is raced against this token and a decline result with code
 /// `source: NapsResultSource.cancelled` is returned.
 class NapsCancelToken {
+  /// Creates a [NapsCancelToken].
+  NapsCancelToken();
+
   final _completer = Completer<void>();
 
   /// Returns `true` if [cancel] has already been called.

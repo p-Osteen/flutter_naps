@@ -37,6 +37,9 @@ class NapsFramePeek {
 /// stops on a field boundary is indistinguishable from a finished one. This
 /// class closes that gap with the envelope rules from the specification.
 class NapsFrameBuffer {
+  /// Creates an empty [NapsFrameBuffer].
+  NapsFrameBuffer();
+
   Uint8List _bytes = Uint8List(0);
 
   /// Tags every exchanged message must carry (guide §4.1, spec §III.2.1):

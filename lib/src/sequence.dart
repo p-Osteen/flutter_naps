@@ -7,6 +7,9 @@
 /// every payment reuses the same number — which is what this SDK did before,
 /// emitting NS=000002 for every transaction it ever made.
 abstract class NapsSequenceStore {
+  /// Abstract const constructor to allow subclassing.
+  const NapsSequenceStore();
+
   /// Allocates the next sequence number, persisting it before it is used.
   Future<int> next();
 
@@ -16,6 +19,7 @@ abstract class NapsSequenceStore {
 
 /// Wraps the counter arithmetic so implementations only have to persist an int.
 class NapsSequence {
+  /// Private constructor to prevent instantiation of this utility class.
   NapsSequence._();
 
   /// NS is 6 characters, so the counter runs 1..999999 and wraps.

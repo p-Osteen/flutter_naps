@@ -1,3 +1,9 @@
+## 2.1.2
+
+### Documentation & Dartdoc Score
+* **Constructor Documentation**: Added explicit dartdoc comments to constructors across instantiable and abstract classes (`NapsCancelToken`, `NapsFrameBuffer`, `NapsConnection`, `NapsSequenceStore`), resolving missing constructor documentation warnings in `pana`.
+* **Utility Constructors**: Added private constructors (`._()`) with doc comments to static utility classes (`NapsResponseCodes`, `NapsTlv`, `NapsLogRedactor`, `NapsPan`, `NapsSequence`) to prevent instantiation and achieve 100% dartdoc coverage.
+
 ## 2.1.1
 
 ### Documentation & Public API Coverage

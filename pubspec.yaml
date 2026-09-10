@@ -1,6 +1,6 @@
 name: naps_flutter
 description: "A Flutter SDK for integrating NAPS SUNMI P2 payment terminals using the M2M TLV protocol via TCP/IP and Serial."
-version: 2.1.1
+version: 2.1.2
 homepage: https://github.com/p-Osteen/flutter_naps
 repository: https://github.com/p-Osteen/flutter_naps
 issue_tracker: https://github.com/p-Osteen/flutter_naps/issues
